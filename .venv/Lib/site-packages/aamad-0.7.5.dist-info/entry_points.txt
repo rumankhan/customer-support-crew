@@ -1,0 +1,2 @@
+[console_scripts]
+aamad = aamad.cli:main
