@@ -87,7 +87,7 @@ Multi-agent architecture matches support work (route → research → reply → 
 3. Retriever grounds on local KB  
 4. Response Specialist drafts personalized reply **or refuses** if ungrounded  
 5. Escalation Manager scores text sentiment/risk → **resolve** or **escalate** with packet  
-6. Operator strip shows decision + reason codes *(CSAT prompt = P1 stub only)*
+6. Operator strip shows decision + reason codes from last `ChatResponse` *(CSAT prompt = P1 stub only)*
 
 **Adoption factors**: Grounded accuracy, fast escalate, manager-visible metrics. Barriers: distrust on billing/disputes, compliance fear, integration effort.
 
@@ -114,28 +114,29 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 - role: "Inquiry Classification Specialist"  
 - goal: "Classify customer intent, entities, and urgency for routing"  
 - tools: []  
-- runtime notes: low temperature; structured JSON: `{intent, urgency, entities, confidence}`
+- runtime notes: low temperature; `output_pydantic: ClassifierOutput` — `{intent, urgency, entities, confidence}`
 
 **agent: knowledge_retriever**  
 - role: "Knowledge Base Research Specialist"  
 - goal: "Retrieve grounded passages with citations for the classified intent"  
 - tools: [`kb_search`]  
-- runtime notes: local/seed KB only in MVP (no external SaaS); return `{passages[], citations[], gap: bool}` if below similarity threshold
+- runtime notes: local/seed KB only; **TF-IDF / bag-of-words** (SAD ADR-13); floor `KB_SIMILARITY_FLOOR=0.35`; `output_pydantic: RetrieverOutput` — `{passages[], citations[], gap: bool}`
 
 **agent: response_specialist**  
 - role: "Customer Response Composer"  
 - goal: "Draft clear, personalized, policy-aligned replies using only grounded evidence"  
 - tools: []  
-- runtime notes: refuse when `gap=true` or no passages; never invent policy/pricing; output `{reply, sources_used[], refused: bool}`
+- runtime notes: refuse when `gap=true` or no passages; never invent policy/pricing; `output_pydantic: ResponseOutput` — `{reply, sources_used[], refused: bool}`
 
 **agent: escalation_manager**  
 - role: "Sentiment, Risk & Escalation Coordinator"  
 - goal: "Score text sentiment/risk and decide resolve vs escalate; package context for humans"  
 - tools: [`ticket_stub`] (in-memory / no-op create OK)  
-- runtime notes: **no biometric emotion recognition**; deterministic rules on confidence, sentiment, customer_request_human, gap/refusal; output `{decision: resolve|escalate, sentiment, risk, reason_codes[], packet}`
+- runtime notes: **no biometric emotion recognition**; deterministic rules on confidence, sentiment+risk (SAD ADR-17), customer_request_human, gap/refusal → escalate (ADR-16); `output_pydantic: EscalationOutput` — `{decision, sentiment, risk, reason_codes[], packet: EscalationPacket|null}`
 
 **Task chain (sequential, `Task.context`):**  
-`classify_inquiry` → `retrieve_knowledge` → `compose_response` → `triage_and_escalate`
+`classify_inquiry` → `retrieve_knowledge` → `compose_response` → `triage_and_escalate`  
+(Named models and `tasks.yaml` sketch locked in SAD §2.)
 
 ### Integration Requirements
 
@@ -145,7 +146,7 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 | Seed / local knowledge corpus | Required (files under repo; simple retriever) | Managed vector SaaS |
 | Ticketing (Zendesk/etc.) | **Stub only** — no live third-party | Live connector (P1) |
 | CRM write actions | Out | P1+ |
-| Auth | Demo-safe: open chat; optional `OPERATOR_API_KEY` for operator panel | SSO/IAM |
+| Auth | Demo-safe: open chat; optional `OPERATOR_API_KEY` only if last-result polish is enabled | SSO/IAM |
 | LLM provider | Via env (`OPENAI_API_KEY` or provider used by CrewAI) | Multi-provider router |
 | Database | **None** (backend persona forbids persistence) | Optional store later |
 
@@ -186,7 +187,7 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 
 5. **Operator visibility (minimal)** (`AC-05`)  
    - User story: As an operator, I can view conversation status (resolved/escalated) and agent rationale.  
-   - Acceptance: UI panel or `/api/last-result` style read shows `decision`, `reason_codes`, and step summaries (`AC-05a`).
+   - Acceptance: UI operator strip shows `decision`, `reason_codes`, and step summaries from the **last `ChatResponse` held in FE UI state** (`AC-05a`). `/api/last-result` is optional polish only — not required for AC-05 or Integration exit.
 
 6. **Health & failure path** (`AC-06`)  
    - Acceptance: `GET /health` returns ok when API up (`AC-06a`); LLM/KB failure returns structured error and safe user message with escalate CTA (`AC-06b`).
@@ -215,7 +216,8 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 ## 5. Non-Functional Requirements
 
 ### Performance
-- Automated path p95 < 30s; first token/status < 10s where streaming exists
+- Automated path p95 < 30s end-to-end (non-streaming JSON after full crew kickoff)
+- StatusLine: first stage label visible within 10s of send via **local optimistic animation** (not streaming tokens; streaming = Future Work)
 - Graceful timeout with escalate-on-timeout
 
 ### Security & Compliance
@@ -240,21 +242,24 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 |-----------------|--------------|----------------------------------------|
 | Chat page `/` | Message list, composer, send | — |
 | AI disclosure banner | Always visible until acknowledged or persistent notice | — |
-| Status line | Shows pipeline stage labels during wait | Streaming tokens |
+| Status line | Optimistic local stage labels during wait (no streaming protocol) | Streaming tokens |
 | Result card | Final reply + sources or escalate notice | — |
-| Operator strip | Decision, reason_codes, expand step summaries | Full history / metrics dashboard |
+| Operator strip | Bound to last `ChatResponse` in UI state: decision, reason_codes, expand step summaries | Full history / metrics dashboard; optional `/api/last-result` |
 | “Talk to a human” | Sets flag / calls API with `request_human=true` | Live agent chat |
 | Voice / email tabs | — | Visible Future Work stubs |
 
 - Framework: Next.js App Router + Tailwind + TS (per FE persona defaults)
 - Responsive: usable at 375px and 1280px widths
 - Accessibility: keyboard send (Enter), focusable controls, contrast adequate for demo
+- **Visual direction (MVP):** light color theme (light backgrounds, dark text); modern web fonts via next/font or equivalent (avoid default system-only stacks for body/display); clean chat layout — no dark-mode default for MVP
 - FE epic **must not** call real backend until Integration epic (use mock data or disabled send documented in `frontend.md`)
+- Visual implementation details live in `frontend.md`; behavior contracts remain in SAD §2
 
 ### Agent Interaction Design
-- Transparent status: “Classifying… Retrieving… Composing… Triaging…”
+- **StatusLine UX contract (non-streaming):** On send, cycle “Classifying… Retrieving… Composing… Triaging…” on a **local timer**. On response, stop animation and render reply + authoritative `steps[]`. On error/timeout, stop animation and show safe message + escalate CTA. Do **not** invent SSE/WebSocket/streaming in MVP.
 - Errors: human-readable + escalate CTA
 - Explainability: short rationale + sources for operators; customers see source titles when resolving
+- Operator strip: prefer UI state from last chat response for grading; `/api/last-result` optional polish
 
 ---
 
@@ -306,11 +311,23 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 | Week | Dates (2026) | Build epic(s) | Persona | Deliverables | Status |
 |------|--------------|---------------|---------|--------------|--------|
 | 1 | Aug 1–7 | **Architecture** + **Setup** | `@system.arch`, `@project.mgr` | `sad.md`, scaffold, `.env.example`, `setup.md` | Assumed started/complete |
-| 2 | Aug 8–14 | **Backend** (Module 1 — crew) | `@backend.eng` | `agents.yaml`, `tasks.yaml`, offline `kickoff()` | **Current** |
-| 3 | Aug 15–21 | **Backend** (API) + **Frontend** start | `@backend.eng`, `@frontend.eng` | `POST /api/chat` (or SAD name), Next.js chat shell | Upcoming |
-| 4 | Aug 22–28 | **Frontend** finish + **Integration** | `@frontend.eng`, `@integration.eng` | Disclosure UI, operator strip, FE↔BE wired | Upcoming |
+| 2 | Aug 8–14 | **Backend** (Module 1 — crew) | `@backend.eng` | Named `output_pydantic` models; `agents.yaml` / `tasks.yaml`; offline `kickoff()`; seed ≥10 FAQs | **Current** |
+| 3 | Aug 15–21 | **Backend** (API) + **thin FE** | `@backend.eng`, `@frontend.eng` | `POST /api/chat` vertical slice; Next.js chat shell (reply + Talk-to-human); optimistic StatusLine | Upcoming |
+| 4 | Aug 22–28 | **FE polish** + **Integration** | `@frontend.eng`, `@integration.eng` | Operator strip, disclosure polish, Future Work stubs; FE↔BE wire from last `ChatResponse` | Upcoming |
 | 5 | Aug 29–Sep 4 | **QA** (+ security recommended) | `@qa.eng`, `@security.eng` | `qa.md` vs `AC-*`; `security.md` | Upcoming |
 | 6 | Sep 5–12 | Deliver (post-Build) | `@devops.eng` | `deploy.md`, `user-guide.md`, demo | Upcoming |
+
+### Sprint 1 success (Week 2→3 vertical slice — before UI polish)
+
+```text
+POST /api/chat (+ optional request_human)
+  → FastAPI validate
+  → sequential crew (classifier → kb_search → compose → triage)
+  → ChatResponse { decision, sources_used | escalation packet, reason_codes, steps[], trace_id, STUB-* on escalate }
+  → UI shows reply + Talk-to-human CTA
+```
+
+Demo paths A/B/C must pass against ≥10 FAQ KB. Defer StatusLine polish, OperatorStrip expand, disclosure edge cases, Future Work stubs, and `/api/last-result` until after this slice works.
 
 ### Development Phases (mapped to weeks)
 1. **Define / Architecture / Setup** (Week 1): MRD ✓, PRD ✓ → SAD/SFS + stories + scaffold  
@@ -324,7 +341,7 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 ### Risk Mitigation
 | Risk | Mitigation |
 |------|------------|
-| Hallucinations | RAG threshold + refusal + eval set |
+| Hallucinations | RAG threshold (`KB_SIMILARITY_FLOOR=0.35`) + refusal + eval set |
 | Cost overrun | max_rpm, max_iter, caching retrieval |
 | CSAT on escalate | Context-rich handoff; early human exit |
 | Compliance | Disclosure P0; security assessment; redact traces |
@@ -369,77 +386,96 @@ Sufficient detail for each of the six Build-stage epics. Personas must not inven
 | Variable | Purpose |
 |----------|---------|
 | `OPENAI_API_KEY` (or provider key CrewAI uses) | LLM access |
+| `OPENAI_MODEL_LOW` | Low tier (default `gpt-4.1-nano`) — classify, retrieve, escalate |
+| `OPENAI_MODEL_MID` | Mid tier (default `gpt-4.1-mini`) — response specialist |
+| `OPENAI_MODEL` | Fallback if a tier env unset (default `gpt-4o-mini`) |
 | `AAMAD_TARGET_RUNTIME` | `crewai` |
 | `BACKEND_PORT` | API listen port (e.g. 8000) |
 | `NEXT_PUBLIC_API_BASE_URL` | FE→API base (Integration uses) |
 | `OPERATOR_API_KEY` | Optional operator panel gate |
 | `LOG_DIR` | Default `project-context/2.build/logs` |
+| `KB_DIR` | Default `backend/kb` |
+| `CLASSIFIER_CONFIDENCE_MIN` | Default `0.55` |
+| `KB_SIMILARITY_FLOOR` | Default `0.35` |
 
 **Exit:** `setup.md` lists next steps for FE/BE/Integration; `crew.kickoff` not implemented here
 
 ### 10.3 Backend (`@backend.eng` → `backend.md`)
 
 **Must implement**
-- `config/agents.yaml` + `config/tasks.yaml` for the 4 agents / 4 tasks  
-- `crew.py` (or equiv.) sequential process; `memory=False`; `max_iter≤12`  
-- Tool `kb_search` over local seed KB; tool `ticket_stub` no-op/in-memory  
-- HTTP API:
+- `config/agents.yaml` + `config/tasks.yaml` for the 4 agents / 4 tasks with named `output_pydantic` models: `ClassifierOutput`, `RetrieverOutput`, `ResponseOutput`, `EscalationOutput` (+ nested `EscalationPacket`) per SAD §2  
+- `crew.py` (or equiv.) sequential process; `memory=False`; `max_iter≤12`; bind agent LLMs via **SAD ADR-19 tiers** (`low`×3, `mid` for `response_specialist`) — not four separate model envs  
+- Tool `kb_search` over local seed KB (≥10 FAQs covering demo A/B): **TF-IDF / bag-of-words** cosine per SAD ADR-13; floor `KB_SIMILARITY_FLOOR=0.35`; tool `ticket_stub` no-op/in-memory  
+- HTTP API (schemas authoritative in **SAD §2**; keep paths stable):
 
-**`POST /api/chat`** (name may match SAD; keep path stable once set)
+**`POST /api/chat`**
 
 Request:
 ```json
 {
   "message": "string",
   "request_human": false,
-  "session_id": "optional-string"
+  "session_id": "optional-string",
+  "disclosure_acknowledged": true
 }
 ```
 
-Response (non-streaming):
+Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**:
 ```json
 {
   "decision": "resolve|escalate",
   "reply": "string",
   "sources_used": [{"title": "string", "snippet": "string"}],
-  "sentiment": "string|number",
+  "sentiment": "positive|neutral|negative",
+  "risk": "low|medium|high",
   "reason_codes": ["string"],
   "steps": [{"agent": "string", "summary": "string"}],
   "trace_id": "string",
+  "packet": null,
+  "stub_ticket_id": null,
+  "meta": {
+    "ai_disclosure": true,
+    "disclosure_acknowledged": true
+  },
   "error": null
 }
 ```
 
+- On escalate: set `packet` (`EscalationPacket`) + `stub_ticket_id`; on resolve both `null`. Path B (gap/refuse) → **`decision=escalate`** only (SAD ADR-16).  
+- Map task Pydantic outputs → `ChatResponse` with stable field names (`gap`, `refused`, `reason_codes`, `packet`) per SAD mapper  
 - `GET /health` → `{ "status": "ok" }`  
-- Prompt Trace persisted under `LOG_DIR` / `project-context/2.build/logs` (redact secrets)  
+- Prompt Trace persisted under `LOG_DIR` / `project-context/2.build/logs` (redact secrets; min fields per SAD §2)  
+- Soft timeout **45s**; FE client abort **50–60s**; CORS allow `localhost:3000` and `127.0.0.1:3000`  
+- `GET /api/last-result` optional polish only — **not** required for Backend or Integration exit  
 - **Prohibited:** database, Zendesk/CRM live APIs, analytics products, non-MVP agents  
 
-**Exit:** documented in `backend.md`; offline kickoff + API smokeable with curl
+**Exit:** documented in `backend.md`; offline kickoff + API smokeable with curl; Sprint 1 vertical slice returns resolve/escalate JSON for paths A/B/C
 
 ### 10.4 Frontend (`@frontend.eng` → `frontend.md`)
 
 **Must implement (UI only — no live BE wiring)**
 - Next.js chat page with disclosure banner (`AC-01`)  
-- Composer, message list, loading stage labels, result/escalate card  
-- Operator strip UI bound to **mock** JSON shaped like §10.3 response  
-- Visible stubs: Voice tab, CSAT dashboard, “Live ticketing” badge (non-functional)  
+- Composer, message list, **optimistic local StatusLine** (Classifying → Retrieving → Composing → Triaging on a timer; stop on mock/response — **no streaming protocol**)  
+- Result/escalate card + Talk-to-human CTA bound to mock `ChatResponse`  
+- Operator strip UI bound to **last mock/response `ChatResponse` in UI state** (not a second API path)  
+- Visible stubs: Voice tab, CSAT dashboard, “Live ticketing” badge (non-functional) — **after** thin chat shell works  
 - Tailwind responsive layout  
 
-**Prohibited:** calling real backend; implementing auth/SSO  
+**Prohibited:** calling real backend; implementing auth/SSO; inventing SSE/WebSocket streaming  
 
-**Exit:** `frontend.md` notes mock vs future Integration hook points
+**Exit:** `frontend.md` notes mock vs future Integration hook points; StatusLine contract documented
 
 ### 10.5 Integration (`@integration.eng` → `integration.md`)
 
 **Must implement**
-- Wire FE send → `POST /api/chat` using `NEXT_PUBLIC_API_BASE_URL`  
-- Map response fields into chat + operator strip  
+- Wire FE send → `POST /api/chat` using `NEXT_PUBLIC_API_BASE_URL` (single MVP path)  
+- Map response fields into chat + operator strip from **last `ChatResponse`**  
 - Error envelope → user-visible message + escalate CTA (`AC-06b`)  
-- Verify happy path resolve + escalate (`request_human=true` and low-confidence path)  
+- Verify happy path resolve + escalate (`request_human=true` and low-confidence / gap path)  
 
-**Prohibited:** third-party SaaS integrations  
+**Prohibited:** third-party SaaS integrations; requiring `/api/last-result` for AC-05  
 
-**Exit:** `integration.md` with verified message-flow notes
+**Exit:** `integration.md` with verified message-flow notes; demo paths A/B/C
 
 ### 10.6 QA (`@qa.eng` → `qa.md`)
 
@@ -494,31 +530,36 @@ Response (non-streaming):
 - “Learns and adapts” = analytics + human-approved KB/prompt updates post-MVP — **not** in 6-week build.
 - **Ticketing is stub-only** for course MVP (no live third-party) — resolves prior Open Question for Build.
 - **Runtime locked to `crewai`** for this course delivery unless operator overrides before Backend Week 2 ends.
-- English-only seed KB; ≥10 FAQ docs in-repo.
+- English-only seed KB; ≥10 FAQ docs in-repo covering demo paths A/B.
 - Sentiment is text-only inside `escalation_manager` (4-agent cap).
-- **Non-streaming JSON** API for MVP; streaming UI is a visible stub only.
+- **Non-streaming JSON** API for MVP; StatusLine uses **optimistic local stage animation**; streaming UI is a visible stub only.
+- Retrieval provisional default: **TF-IDF / bag-of-words**; `KB_SIMILARITY_FLOOR=0.35` (SAD ADR-13); tune without topology change.
+- Operator strip fed from **last ChatResponse UI state** (SAD ADR-14); `/api/last-result` optional polish.
 - **No database** in Backend epic.
 - Clarifying multi-turn and CSAT dashboard are **P1 / not required** for Sep 12 demo.
 - Operator strip is **in-app**, not a separate console product.
+- Sprint 1 success = vertical slice chat → ChatResponse → reply + Talk-to-human before full UI polish.
 - Fixed calendar: 2026-08-01 → 2026-09-12; Week 2 current as of 2026-08-08.
+- Where PRD §10.3 and SAD §2 diverge, **SAD §2 wins** for Build contracts (schemas synced 2026-08-12).
 
 ## Open Questions
 
-1. Exact LLM model string for CrewAI (e.g. `gpt-4o-mini` vs other) — SAD/Backend may pick cost-efficient default.  
+1. ~~Exact LLM model string~~ — **Resolved (SAD ADR-19):** tier map — `OPENAI_MODEL_LOW` default `gpt-4.1-nano` (3 agents), `OPENAI_MODEL_MID` default `gpt-4.1-mini` (`response_specialist`); `OPENAI_MODEL` fallback `gpt-4o-mini`. Backend records resolved map in Audit.  
 2. Disclosure legal copy owner (use generic: “You are chatting with an AI assistant”) until provided.  
 3. Confirm Week-1 `sad.md` / `setup.md` already exist on disk or must be produced ASAP in Week 2.  
 4. Preferred monorepo layout names if instructor template differs (`apps/web` vs `frontend`).  
 5. Whether `@security.eng` is graded/required for this course section or optional.  
 6. Baseline CSAT metrics — N/A for course demo; use qualitative demo script instead.
+7. GDPR / Prompt Trace retention duration (days).
 
 ## Audit
 
 | Field | Value |
 |-------|-------|
-| Timestamp | 2026-08-08T13:49:48-05:00 |
+| Timestamp | 2026-08-13T07:45:00-05:00 |
 | Persona id | product-mgr |
-| Action | create-context / define-stage success gate |
-| Prior action | create-context / prd course-alignment @ 2026-08-08T13:47:11-05:00 |
+| Action | align-prd (ADR-19 model tiers in Setup/Backend contracts) |
+| Prior action | sharpen-prd (UX visual direction: light theme + modern fonts) @ 2026-08-13T07:41:00-05:00 |
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai (locked for course MVP) |
 | Prompt Trace | Omitted — requirements synthesis; no secrets |
-| Change note | Added Define Success Gate + MRD→PRD alignment; clarified MVP user value and journey; marked Define COMPLETE |
+| Change note | Tier envs OPENAI_MODEL_LOW/MID; OQ #1 resolved via SAD ADR-19; Backend binds by tier |

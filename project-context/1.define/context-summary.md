@@ -64,6 +64,9 @@ Customer gets a **grounded chat answer** or a **clean human escalation with full
 - Text-only sentiment; Art. 50-style disclosure P0  
 - Secrets via env only; redact traces  
 - No database; no live third-party integrations in MVP  
+- Named task outputs (`ClassifierOutput`…`EscalationPacket`); retrieval floor `0.35` (SAD ADR-13)  
+- Operator strip from last `ChatResponse` UI state; StatusLine = optimistic local animation (no streaming)  
+- Sprint 1 = vertical slice before UI polish  
 - **Fixed 6-week delivery:** 2026-08-01 → 2026-09-12 (**Week 2 current**)
 
 ## 6-Week timeline (six Build epics)
@@ -71,42 +74,44 @@ Customer gets a **grounded chat answer** or a **clean human escalation with full
 | Week | Dates | Epic(s) | Status |
 |------|-------|---------|--------|
 | 1 | Aug 1–7 | Architecture + Setup | Assumed started/complete |
-| 2 | Aug 8–14 | Backend (crew) | **Current** |
-| 3 | Aug 15–21 | Backend API + Frontend start | Upcoming |
-| 4 | Aug 22–28 | Frontend finish + Integration | Upcoming |
+| 2 | Aug 8–14 | Backend (crew + named schemas) | **Current** |
+| 3 | Aug 15–21 | Backend API + thin FE vertical slice | Upcoming |
+| 4 | Aug 22–28 | FE polish + Integration | Upcoming |
 | 5 | Aug 29–Sep 4 | QA (+ security recommended) | Upcoming |
 | 6 | Sep 5–12 | Deliver | Upcoming |
 
 ## Next recommended actions
 
 1. `@project.mgr` → `*setup-project` / `*configure-env` / `*document-setup`  
-2. `@backend.eng` → crew YAML + kickoff + FastAPI per SAD  
-3. Do not expand into P1 (live ticketing, streaming, DB)
+2. `@backend.eng` → named `output_pydantic` models + crew YAML + kickoff + `POST /api/chat` vertical slice per SAD  
+3. Do not expand into P1 (live ticketing, streaming, DB); polish StatusLine/OperatorStrip after slice works
 
 ## Sources
 
 - `project-context/1.define/mrd.md`
 - `project-context/1.define/prd.md` (§8–§10)
+- `project-context/1.define/sad.md` (ADR-13/14/15; Sprint 1 slice)
 - AAMAD README Phase 2 epics; SAD template MVP agent cap
-- Operator: 6-week course alignment (2026-08-08)
+- Operator: 6-week course alignment (2026-08-08); pre-Build sharpen (2026-08-12)
 
 ## Assumptions
 
 - Course MVP freezes: stub ticketing, no DB, crewai, non-streaming, 4 agents
 - Project clock started 2026-08-01
+- Retrieval hybrid + floor 0.35; AC-05 via UI state (SAD OQ #2–#3 closed)
 
 ## Open Questions
 
-- See PRD §Open Questions (model string, disclosure copy, Week-1 artifact presence, folder naming, security grading)
+- See PRD §Open Questions (disclosure copy, folder naming, security grading). SAD OQ #2 (operator path) and #3 (retrieval floor) are **resolved**.
 
 ## Audit
 
 | Field | Value |
 |-------|-------|
-| Timestamp | 2026-08-08T13:49:48-05:00 |
+| Timestamp | 2026-08-12T07:36:00-05:00 |
 | Persona id | product-mgr |
-| Action | create-context (define success gate) |
-| Prior action | create-context (course alignment sync) @ 2026-08-08T13:47:11-05:00 |
+| Action | sharpen-context-summary (pre-Build feedback sync) |
+| Prior action | create-context (define success gate) @ 2026-08-08T13:49:48-05:00 |
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai (locked) |
 | Prompt Trace | Omitted — handoff summary only; no secrets |
-| Change note | Recorded Define COMPLETE against Clarity/Completeness/Alignment/Scope indicators |
+| Change note | Synced Sprint 1 vertical slice, closed SAD OQs, StatusLine/operator/retrieval locks |

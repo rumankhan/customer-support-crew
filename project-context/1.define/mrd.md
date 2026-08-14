@@ -156,9 +156,9 @@
 | Week | Dates (2026) | Phase | Focus | Exit criteria | Status (as of 2026-08-08) |
 |------|--------------|-------|-------|---------------|---------------------------|
 | 1 | Aug 1–7 | Architecture + Setup | SAD/SFS, scaffold, env, KB inventory | SAD approved; repo runnable; Open Questions frozen for MVP | **Assumed started / complete** (prior week) |
-| 2 | Aug 8–14 | Backend (crew) | CrewAI agents/tasks YAML; `crew.kickoff()`; retrieval stub | 4-agent chain executes offline | **Current week** |
-| 3 | Aug 15–21 | Backend API + Frontend | Chat API, Prompt Trace, health; Next.js shell | API returns resolve/escalate JSON | Upcoming |
-| 4 | Aug 22–28 | Frontend + Integration | Disclosure UI, operator strip; FE↔BE wire | Happy-path chat E2E | Upcoming |
+| 2 | Aug 8–14 | Backend (crew) | CrewAI agents/tasks YAML + named schemas; `crew.kickoff()`; hybrid retrieval floor 0.35 | 4-agent chain executes offline; ≥10 FAQs seeded | **Current week** |
+| 3 | Aug 15–21 | Backend API + thin FE | Vertical slice: chat → FastAPI → crew → ChatResponse; Next.js reply + Talk-to-human | Demo paths A/B/C JSON + thin UI | Upcoming |
+| 4 | Aug 22–28 | FE polish + Integration | Disclosure, StatusLine polish, operator strip from last response; FE↔BE wire | Happy-path chat E2E | Upcoming |
 | 5 | Aug 29–Sep 4 | QA (+ security) | Unit/integration/AC-01…06; security.md | `qa.md` pass (or scoped gaps) | Upcoming |
 | 6 | Sep 5–12 | Deliver | CI, deploy/runbook, user guide, demo | Demo ready | Upcoming |
 
@@ -190,13 +190,13 @@
 ## Actionable Recommendations
 
 ### Immediate Next Steps (Week 2 catch-up / ≤48 hours)
-1. Close any remaining Week-1 gaps (SAD/SFS, stories, scaffold, Open Questions freeze).
+1. Close any remaining Week-1 gaps (SAD/SFS, stories, scaffold; retrieval/operator OQs closed in SAD ADR-13/14).
 2. Inventory KB sources and PII classes; draft disclosure copy if not done in Week 1.
-3. Start Module 1 crew YAML + offline `kickoff()`; protect Sep 12 end date.
+3. Start Module 1 crew YAML with named `output_pydantic` models + offline `kickoff()`; protect Sep 12 end date.
 
 ### In-Window Priorities (Weeks 2–6 — complete by 2026-09-12)
-1. Sequential crew + chat API + disclosure UI + escalation handoff.
-2. Eval set of ≥50 labeled tickets; QA + security gate; deploy docs.
+1. Vertical slice: sequential crew + `POST /api/chat` + thin chat UI (reply + Talk-to-human) before full FE polish.
+2. Eval set / demo paths A/B/C; QA + security gate; deploy docs.
 3. Demo-ready MVP with stubbed ticketing unless a thin connector is explicitly P0.
 
 ### Post-MVP Strategy (after Week 6 / 6–12 months)
@@ -260,11 +260,12 @@
 
 | Field | Value |
 |-------|-------|
-| Timestamp | 2026-08-08T13:42:18-05:00 |
+| Timestamp | 2026-08-12T07:36:00-05:00 |
 | Persona id | product-mgr |
-| Action | create-mrd (timeline rebaseline) |
-| Prior action | create-mrd (timeline update) @ 2026-08-08T13:26:02-05:00 |
+| Action | sharpen-mrd (align Week 2–3 exit to vertical slice) |
+| Prior action | create-mrd (timeline rebaseline) @ 2026-08-08T13:42:18-05:00 |
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai (default; env unset; example config agrees) |
-| Prompt Trace | Omitted from artifact body — research synthesis from cited URLs + stakeholder brief; no secret material included |
+| Prompt Trace | Omitted from artifact body — research synthesis; no secret material included |
 | Model / controls | Deterministic artifact authoring; temperature N/A for file write |
+| Change note | Week 2–3 exit criteria aligned to named schemas + chat→ChatResponse vertical slice; market sections unchanged |
 | Change note | Rebaselined start 2026-08-01; end 2026-09-12; synced 4-agent course cap + six Build epic week map (2026-08-08) |
