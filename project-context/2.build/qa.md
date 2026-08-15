@@ -170,7 +170,7 @@ Validation empty-submit keeps **Ready** (crew did not start) and shows composer 
 | DEF-01 | Medium | AC-03b / reason_codes | **CLOSED** — Path B mock now uses SAD `retrieval_gap` + `refused`. | — |
 | DEF-02 | Low | Reason-code vocabulary | Path A mock uses `grounded_kb_hit` (not in SAD list). Resolve may use empty codes or omit extras. | `@frontend.eng` |
 | DEF-03 | Low | AC-06b CTA | Escalate card copy is informational (“Talk-to-human is available…”) rather than a control that sets `request_human` and re-runs. Checkbox remains the AC-01a control. | `@frontend.eng` (polish) |
-| DEF-04 | Low | `frontend-funcional-spec.md` vs code | **CLOSED** — spec now allows submit from `done` without reset; **Start new conversation** is optional and **clears** the thread. | Spec sync |
+| DEF-04 | Low | `frontend.md` Inputs/Run vs code | **CLOSED** — spec now allows submit from `done` without reset; **Start new conversation** is optional and **clears** the thread. | Spec sync |
 | DEF-05 | Coverage | AC-06b | Timeout / error envelope cannot be triggered from the UI with current stub latency. | `@frontend.eng` (dev-only mock switch) or Integration once API exists |
 | DEF-06 | Medium | Crew status banner | **FIXED** (retest PASS) | Top `CrewStatusBanner` shows `Crew: idle/running/done`. |
 | DEF-07 | Medium | Crew status color | **FIXED** (error color unexercised) | Gray/blue/green pills verified. Red implemented, no UI trigger (DEF-05). |
@@ -210,8 +210,7 @@ Runtime checks deferred: YAML load, Prompt Trace file for `trace_id`, real `tick
 
 - `project-context/1.define/sad.md` (§1–2 UI, demo queries A/B/C, ADR-14/15/16, testing expectations)
 - `project-context/1.define/prd.md` (AC-01…AC-06)
-- `project-context/2.build/frontend.md`
-- `project-context/2.build/frontend-funcional-spec.md`
+- `project-context/2.build/frontend.md` (behavior + implementation; former `frontend-funcional-spec.md` folded in)
 - `.cursor/agents/qa-eng.md`
 - `aamad.config.example.yml` (testing + security flags; no `aamad.config.yml`)
 - Browser session at `http://localhost:3000/` on 2026-08-15
