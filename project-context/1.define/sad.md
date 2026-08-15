@@ -745,13 +745,16 @@ POST /api/chat
 
 | Field | Value |
 |-------|-------|
-| Timestamp | 2026-08-13T07:51:00-05:00 |
+| Timestamp | 2026-08-14T20:18:00-05:00 |
 | Persona id | system-arch |
-| Action | sharpen-sad (polish: Path B wording, Future Work/exclusions, agents.yaml model_tier) |
-| Prior action | sharpen-sad (ADR-19 model tiers: low×3 + mid×1) @ 2026-08-13T07:45:00-05:00 |
+| Action | review-sad (MRD + PRD alignment; location gate) |
+| Prior action | sharpen-sad (polish: Path B wording, Future Work/exclusions, agents.yaml model_tier) @ 2026-08-13T07:51:00-05:00 |
+| Review verdict | **PASS** — SAD is Build-ready; no blocking MRD/PRD conflicts |
+| Location | **Kept** at `project-context/1.define/sad.md` (not moved to `2.build`) |
+| Location rationale | AAMAD `DEFINE_REQUIRED` + `@system.arch` output contract + all Build persona inputs require `1.define/sad.md`; `2.build/` holds setup/frontend/backend/integration/qa artifacts only |
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai (PRD-locked; env unset → adapter default) |
-| Prompt Trace | Omitted — architecture synthesis; no secrets |
+| Prompt Trace | Omitted — architecture review; no secrets |
 | Model / controls | Deterministic artifact write; N/A temperature for file output |
 | Adapter rule | `.cursor/rules/adapter-crewai.mdc` |
 | Warning | None — runtime resolved cleanly to crewai |
-| Change note | Path B escalate-only wording; Future Work + exclusions for Ollama/high tier/rate limit; agents.yaml model_tier sketch |
+| Change note | Review-only Audit append; no architectural content change |
