@@ -2,7 +2,7 @@ export function FutureWorkStubs() {
   const stubs = ["Voice", "CSAT dashboard", "Live ticketing"];
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-      <span>Future work:</span>
+      <span>Coming later:</span>
       {stubs.map((label) => (
         <span
           key={label}

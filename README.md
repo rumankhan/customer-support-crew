@@ -1,6 +1,6 @@
 # Multi-Agent Customer Support Crew
 
-Chat-first MVP that runs four specialized [CrewAI](https://www.crewai.com/) agents so a customer gets either a **knowledge-grounded answer with citations** or a **clean human escalation with a full context packet**.
+Chat-first MVP for **B-Mobile**, a fictional consumer mobile carrier. Four specialized [CrewAI](https://www.crewai.com/) agents give a customer either a **knowledge-grounded answer with citations** or a **clean human escalation with a full context packet**.
 
 This is a course/demo orchestration layer — not a CCaaS or live ticketing suite. It is built with the [AAMAD](https://pypi.org/project/aamad/) (AI-Assisted Multi-Agent Application Development) workflow.
 
@@ -13,7 +13,7 @@ This is a course/demo orchestration layer — not a CCaaS or live ticketing suit
 | Phase | State |
 |-------|--------|
 | **Define** | Complete — MRD, PRD, context summary, and SAD reviewed against each other (**PASS**, 2026-08-14) |
-| **Build** | Not started — next is `@project.mgr` → `*setup-project` |
+| **Build** | Frontend mocks + B-Mobile seed KB `backend/kb/articles.csv` — backend crew not yet live |
 | **Deliver** | Not started |
 
 **Runtime:** `crewai` (locked for this course MVP).  
@@ -35,11 +35,11 @@ The API then returns a single non-streaming JSON `ChatResponse`: resolve with so
 
 | Demo path | Example | Expected |
 |-----------|---------|----------|
-| **A** — in-KB FAQ | `How do I reset my Acme Cloud password?` | `decision=resolve`, citations, no packet |
+| **A** — in-KB FAQ | `How do I reset my B-Mobile My Account PIN?` | `decision=resolve`, citations, no packet |
 | **B** — unknown topic | `What is your quantum warranty for the hardware drone?` | `decision=escalate` (never resolve-only refuse), packet + stub |
 | **C** — request human | Billing complaint with `request_human=true` | `decision=escalate`, `reason_codes` include `request_human`, all four steps |
 
-**In MVP:** Next.js chat UI, FastAPI gateway, local Markdown KB (≥10 Acme Cloud FAQs), in-memory ticket stub, operator strip, Prompt Trace files.
+**In MVP:** Next.js UI, FastAPI gateway, local CSV KB (≥10 **B-Mobile** FAQ rows in `backend/kb/articles.csv`), in-memory ticket stub, operator strip, Prompt Trace files.
 
 **Out of MVP:** live Zendesk/Intercom, streaming tokens, multi-turn clarifier, CSAT dashboard, database, SSO, voice, CRM writes, fifth agent, biometric emotion.
 
@@ -51,7 +51,7 @@ The API then returns a single non-streaming JSON `ChatResponse`: resolve with so
 |-------|--------|
 | Frontend | Next.js (App Router) + TypeScript + Tailwind |
 | Backend | Python + FastAPI + CrewAI (YAML agents/tasks) |
-| Retrieval | TF-IDF / bag-of-words over `backend/kb/` (floor `0.35`) |
+| Retrieval | TF-IDF / bag-of-words over `backend/kb/articles.csv` (floor `0.35`) |
 | LLM | OpenAI-compatible; tiers `OPENAI_MODEL_LOW` / `OPENAI_MODEL_MID` |
 | Transport | Non-streaming JSON — `POST /api/chat`, `GET /health` |
 
@@ -67,8 +67,8 @@ Acceptance criteria for QA: `AC-01` … `AC-06` in the [PRD](project-context/1.d
 │   ├── 1.define/          # MRD, PRD, SAD, context summary  ← current source of truth
 │   ├── 2.build/           # setup / frontend / backend / integration / qa (not yet)
 │   └── 3.deliver/         # deploy.md + user-guide (not yet)
-├── backend/               # FastAPI + CrewAI (to be implemented)
-├── frontend/              # Next.js chat (to be implemented)
+├── backend/               # FastAPI + CrewAI; seed FAQs in backend/kb/articles.csv
+├── frontend/              # Next.js B-Mobile support UI (mocks until Integration)
 ├── .cursor/               # AAMAD personas, rules, templates
 ├── AGENTS.md
 └── CHECKLIST.md
@@ -101,13 +101,23 @@ Optional gate: `aamad validate --phase define|build|deliver`.
 
 ---
 
-## Local run (after Build)
+## Local run
 
-When Setup and Backend exist:
+**Frontend (mocks, no Python venv):**
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open http://localhost:3000. Chat window: your messages on the right, B-Mobile on the left. Seeded happy path: `How do I reset my B-Mobile My Account PIN?` then **Get help** (**I'd rather talk to a person** unchecked). **Start new conversation** (next to Get help after a thread exists) clears the tab. Stubs load `backend/kb/articles.csv` (mock `GET /api/kb` + `frontend/lib/kb.ts`). CrewAI is **not** called yet — Integration will replace `frontend/lib/api.ts` / `runService.ts` with `POST ${NEXT_PUBLIC_API_BASE_URL}/api/chat`.
+
+**Backend (when FastAPI + crew exist):**
 
 1. Copy `.env.example` → `.env` and set `OPENAI_API_KEY` (never commit secrets).
-2. Backend: `uvicorn` on port **8000** (`GET /health` → `{ "status": "ok" }`).
-3. Frontend: Next.js on port **3000**, `NEXT_PUBLIC_API_BASE_URL` pointing at the API.
+2. Activate `.venv`, run `uvicorn` on port **8000** (`GET /health` → `{ "status": "ok" }`).
+3. Point the frontend at the API with `NEXT_PUBLIC_API_BASE_URL`.
 4. CORS allowlist: `http://localhost:3000` and `http://127.0.0.1:3000`.
 
 Soft timeout is **45s** on the API; the chat client should abort at **50–60s**.

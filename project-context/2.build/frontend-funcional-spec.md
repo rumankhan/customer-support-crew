@@ -1,18 +1,18 @@
 # Frontend Functional Spec: Critical Research Workflow
 
 **Feature ID**: FE-CRW-001  
-**Primary UI**: single route `/` (form + results on one page)  
+**Primary UI**: single route `/` (chat window + Status + For specialists)  
 **Selected Runtime**: `crewai` (UI mocks only; no live API in this epic)  
 **Owning persona**: `@frontend.eng`
 
-This spec defines the **Critical Research Workflow** — the customer-facing path that submits a research query, runs a mocked multi-agent research cycle, and shows a grounded result or a clean escalate packet. Persistent chat transcripts, live `POST /api/chat`, and a database-backed history are out of this epic.
+This spec defines the **Critical Research Workflow** for **B-Mobile** (fictional consumer mobile carrier): the customer submits a support question from the chat composer, a mocked multi-agent cycle retrieves dummy help articles (or escalates), and the UI shows a grounded reply in a B-Mobile bubble or a handoff notice. Persistent transcripts, live `POST /api/chat`, and a database-backed history are out of this epic.
 
 ---
 
 ## Purpose and Scope
 
-- **Purpose**: Let a customer submit a research question, watch a run complete (`idle → running → done`), and inspect the latest result plus session history.
-- **In Scope**: Inputs form, run FSM + stub services, results panel, in-session history, Spec Sync checklist.
+- **Purpose**: Let a B-Mobile customer submit a support question, watch a run complete (`idle → running → done`), and read the reply in the same chat thread.
+- **In Scope**: Chat window + compact composer, run FSM + stub services, specialist strip from last `ChatResponse`, session thread in React state, Spec Sync checklist.
 - **Out of Scope**: Live backend wiring (Integration epic); streaming tokens; SSO; Voice / CSAT / live ticketing (visible stubs only); persisted run history (SAD Future Work).
 
 ---
@@ -21,7 +21,7 @@ This spec defines the **Critical Research Workflow** — the customer-facing pat
 
 | Anchor | Reference |
 |--------|-----------|
-| PRD §6 Interface Requirements | Chat page `/`, disclosure, status line, result card, operator strip, Talk-to-human |
+| PRD §6 Interface Requirements | Chat page `/`, disclosure, status line, chat reply, specialist strip, talk-to-a-person |
 | PRD §10.4 Frontend epic | UI only; mocks; no live BE; Tailwind + Next.js App Router + TypeScript |
 | PRD AC-01…AC-06 | Disclosure, resolve/escalate UX, operator fields, failure CTA |
 | SAD §2 Frontend logical structure | `app/page.tsx`, components, `lib/types.ts`, `lib/api.ts` mocks |
@@ -32,21 +32,21 @@ This spec defines the **Critical Research Workflow** — the customer-facing pat
 
 ## Inputs
 
-Single form on `/`. Submit is enabled only in FSM `idle` (or after explicit reset from `done`).
+Single composer inside `ChatWindow` on `/`. Submit is enabled whenever the FSM is not `running` (`idle` or `done`).
 
 | Input | Type / format | Source | Required | Validation |
 |-------|---------------|--------|----------|------------|
-| `query` | string, mapped to `ChatRequest.message` | Research topic field | Yes | Trimmed non-empty; max **4000** chars (SAD) |
-| `requestHuman` | boolean, mapped to `ChatRequest.request_human` | “Talk to a human” checkbox | No | Default `false` |
+| `query` | string, mapped to `ChatRequest.message` | Chat composer | Yes | Trimmed non-empty; max **4000** chars (SAD) |
+| `requestHuman` | boolean, mapped to `ChatRequest.request_human` | “I'd rather talk to a person” checkbox | No | Default `false` |
 | `disclosureAcknowledged` | boolean, mapped to `ChatRequest.disclosure_acknowledged` | AI disclosure control | No | Default `false`; missing/`false` does **not** block submit (AC-01b) |
 | `sessionId` | optional opaque string | Generated in-session if needed | No | Not shown; not persisted |
 
 **UI rules**
 
 - AI disclosure is visible until acknowledged (AC-01). Acknowledge-to-dismiss is allowed.
-- Keyboard: Enter in the query field submits when valid and phase is `idle`.
-- While `running`, inputs are disabled (no second concurrent run).
-- Empty or >4000-character query: client-side error; FSM stays `idle`; no stub call.
+- Keyboard: Enter in the query field submits when valid and phase is not `running`.
+- While `running`, composer is disabled (no second concurrent run).
+- Empty or >4000-character query: client-side error (“Please type a question so we can help.” / length copy); FSM stays `idle`; no stub call.
 
 ---
 
@@ -62,9 +62,9 @@ idle → running → done
 
 | State | Meaning | UI |
 |-------|---------|----|
-| `idle` | No active run | Form enabled; results empty or showing last completed run after reset-to-edit |
-| `running` | Stub run in flight | Form disabled; status line cycles Classifying → Retrieving → Composing → Triaging (local timer, ADR-15); first label within 10s of send |
-| `done` | Stub returned a result | Form stays disabled until Reset / New research; Results and History update |
+| `idle` | No active run | Composer enabled; chat shows prior turns or empty prompt |
+| `running` | Stub run in flight | Composer disabled; Status **Looking that up**; stages Understanding your question → Searching help articles → Writing a reply → Checking next steps (local timer, ADR-15); pending B-Mobile bubble; first label within 10s of send |
+| `done` | Stub returned a result | Composer enabled for another turn; B-Mobile bubble + specialist strip update. **Start new conversation** (when the thread is not empty) runs `RESET` and **clears** the thread |
 
 ### Transitions
 
@@ -72,8 +72,8 @@ idle → running → done
 |------|-------|----|---------|
 | `idle` | `START` | `running` | Valid submit → `startRun()` succeeds |
 | `running` | `COMPLETE` | `done` | `getRunStatus()` returns `status: "done"` |
-| `done` | `RESET` | `idle` | User chooses New research (keeps History) |
-| `done` | `START` | `running` | User submits again without reset (allowed) |
+| `done` | `RESET` | `idle` | User chooses **Start new conversation** (clears thread + specialist strip) |
+| `done` | `START` | `running` | User submits another question without reset (allowed) |
 
 Illegal transitions are no-ops.
 
@@ -84,7 +84,7 @@ Illegal transitions are no-ops.
 | `startRun` | `{ query, requestHuman, disclosureAcknowledged }` | `{ runId: string }` | In-memory stub; does **not** call `POST /api/chat` |
 | `getRunStatus` | `{ runId }` | `{ status: "running" \| "done", result?: ChatResponse }` | Poll while FSM is `running`; completes with a mock `ChatResponse` |
 
-**Client timeout:** abort wait at **50–60s**. On abort, still transition `running → done` with an error-shaped `ChatResponse` (`error.code = llm_or_timeout`) and Talk-to-human CTA. Do not invent an answer.
+**Client timeout:** abort wait at **50–60s**. On abort, still transition `running → done` with an error-shaped `ChatResponse` (`error.code = llm_or_timeout`) and talk-to-a-person CTA. Do not invent an answer.
 
 **Hook point for Integration:** replace stub bodies in `lib/api.ts` / `lib/services/runService.ts` with `fetch(NEXT_PUBLIC_API_BASE_URL + "/api/chat")`. Do not add that call in this epic.
 
@@ -92,22 +92,20 @@ Illegal transitions are no-ops.
 
 ## Results
 
-Rendered on the same route when FSM is `done` (and may remain visible in `idle` after reset until a new run starts — implementation may clear or keep last result; current UI keeps last result until a new `START`).
-
-Bind to the **last `ChatResponse` in UI state** (ADR-14). Do not call `/api/last-result`.
+Rendered on the same route. Customer-facing content lives in chat bubbles. The specialist strip binds to the **last `ChatResponse` in UI state** (ADR-14). Do not call `/api/last-result`.
 
 | Region | Fields | Notes |
 |--------|--------|-------|
-| Result card | `reply`, `sources_used[]`, escalate notice | Sources on resolve; escalate copy when `decision=escalate` or `error != null` |
-| Talk to a human | CTA | Always visible; in `done` it is informational / Future live-chat. Checkbox on Inputs sets `request_human` for the **next** run |
-| Operator strip | `decision`, `reason_codes[]`, expandable `steps[]`, `trace_id` | From last response only |
-| Packet | `packet`, `stub_ticket_id` | Shown when escalate; `null` on resolve |
+| B-Mobile bubble | `reply`, `sources_used[]`, escalate notice | Sources on resolve; escalate copy when `decision=escalate` or `error != null` |
+| I'd rather talk to a person | Checkbox | Always visible in the composer; sets `request_human` for the **next** send. Escalate notice in chat is informational / Future live-chat |
+| For specialists | `decision`, `reason_codes[]`, expandable `steps[]`, `trace_id` | From last response only; Outcome shows Answered / Sent to a specialist plus the contract `decision` |
+| Packet | `packet`, `stub_ticket_id` | Shown in the strip when escalate; `null` on resolve |
 
 **Demo path expectations (mocked)**
 
 | Path | Typical query | Mock `decision` |
 |------|---------------|-----------------|
-| A | in-KB FAQ (e.g. password reset) | `resolve` + sources |
+| A | in-KB FAQ (e.g. My Account PIN) | `resolve` + sources |
 | B | unknown topic (e.g. quantum warranty) | `escalate` + packet + stub ticket |
 | C | `requestHuman=true` | `escalate`, `reason_codes` include `request_human` |
 
@@ -115,17 +113,17 @@ Bind to the **last `ChatResponse` in UI state** (ADR-14). Do not call `/api/last
 
 ## History
 
-SAD lists **DB/history** as Future Work. This epic implements **session-only** history in React state.
+SAD lists **DB/history** as Future Work. This epic implements a **session-only chat thread** in React state (`history[]` rendered in `ChatWindow`). There is no separate History list and no click-to-restore of a past run.
 
 | Behavior | MVP (this epic) | Future Work |
 |----------|-----------------|-------------|
-| Storage | In-memory list for the browser tab | Persistent DB |
-| Append | Each `done` run prepends `{ runId, query, decision, completedAt }` | Server-side run log |
-| Select | Click a row to re-display that run’s result (no re-fetch) | Replay from API |
+| Storage | In-memory turns for the browser tab | Persistent DB |
+| Append | Each `done` run adds a You + B-Mobile pair | Server-side run log |
+| Start new conversation | Clears thread, specialist strip, FSM → idle | Archive / new ticket |
 | Survive refresh | No | Yes |
 | Cross-tab | No | Optional |
 
-History does not change the FSM by itself. Selecting a past run updates the Results panel only.
+Selecting a past turn is not supported. Follow-up questions append to the same thread unless the customer starts a new conversation.
 
 ---
 
@@ -135,10 +133,10 @@ Update this table **after every commit** that touches frontend code or this spec
 
 ### After-commit checks
 
-- [ ] **Inputs** — form fields and validation still match the Inputs table
+- [ ] **Inputs** — composer fields and validation still match the Inputs table
 - [ ] **Run** — FSM is still `idle → running → done`; `startRun` / `getRunStatus` still stubs (or Integration has updated this spec)
-- [ ] **Results** — Result card + operator strip still bind last `ChatResponse` in UI state
-- [ ] **History** — still session-only unless SAD/PRD changed
+- [ ] **Results** — chat reply + specialist strip still bind last `ChatResponse` in UI state
+- [ ] **History** — session thread only; **Start new conversation** clears the tab unless SAD/PRD changed
 - [ ] **`frontend.md`** — Audit appended for the same change
 - [ ] **No live backend** — no `fetch` to `/api/chat` unless Integration epic owns the commit
 - [ ] **Placeholders** — Voice / CSAT / Live ticketing remain non-functional
@@ -148,6 +146,7 @@ Update this table **after every commit** that touches frontend code or this spec
 | Date | Commit SHA | Spec sections touched | Boxes re-checked | Notes |
 |------|------------|-----------------------|------------------|-------|
 | 2026-08-14 | *(uncommitted — initial FE slice)* | Inputs, Run, Results, History | All drafted | Initial Critical Research Workflow |
+| 2026-08-15 | *(uncommitted — chat window)* | Inputs, Run, Results, History | Re-checked | Chat bubbles; Start new conversation clears thread |
 
 ---
 
@@ -161,16 +160,15 @@ Update this table **after every commit** that touches frontend code or this spec
 ## Assumptions
 
 - `setup.md` is not present; frontend is scaffolded in this epic against SAD layout (`frontend/` Next.js App Router).
-- Operator asked for a **form + results** single route rather than a multi-bubble chat transcript; that is treated as the thin FE vertical slice. A message-list polish can follow without changing stub contracts.
+- Operator asked for a **chat window** (You right / B-Mobile left) with Status under the chat and a specialist strip; stub contracts unchanged.
 - Filename `frontend-funcional-spec.md` is the operator-requested spelling.
 - `AAMAD_TARGET_RUNTIME` is unset → resolve `crewai`.
 - `aamad.config.yml` is absent; `aamad.config.example.yml` UI theme `system` yields to PRD/SAD **light** theme.
 
 ## Open Questions
 
-1. Should Week 4 polish replace this form with a chat message list while keeping the same FSM + stubs?
-2. Should History survive `localStorage` in MVP, or stay tab-session only (current)?
-3. Instructor copy for AI disclosure beyond the generic SAD sentence.
+1. Should the session thread survive `localStorage` in MVP, or stay tab-session only (current)?
+2. Instructor copy for AI disclosure beyond the generic SAD sentence.
 
 ## Audit
 
@@ -179,3 +177,9 @@ Update this table **after every commit** that touches frontend code or this spec
 - **Action**: `develop-fe` (author functional spec)
 - **Resolved runtime**: `crewai` (default; `AAMAD_TARGET_RUNTIME` unset)
 - **Prompt Trace**: omitted — no LLM crew prompts in this UI-only spec; stub copy is static
+
+### Audit (append)
+
+- **Timestamp**: 2026-08-15T17:30:00-05:00
+- **Persona**: `frontend-eng`
+- **Action**: `develop-fe` (spec sync: chat window, Get help, Start new conversation, specialist strip)

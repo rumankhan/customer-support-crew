@@ -1,3 +1,4 @@
+import { loadKbArticles } from "../kb";
 import { mockTimeout, selectMockResponse } from "../mockResponse";
 import type { RunInput, RunStatusResponse, StartRunResponse } from "../types";
 
@@ -24,6 +25,7 @@ function newId(prefix: string): string {
  * with POST /api/chat. Do not fetch a live backend from this module.
  */
 export async function startRun(input: RunInput): Promise<StartRunResponse> {
+  void loadKbArticles();
   const runId = newId("run");
   STUB_STORE.set(runId, {
     input,
@@ -66,6 +68,12 @@ export async function getRunStatus(runId: string): Promise<RunStatusResponse> {
 
   if (elapsed >= CLIENT_TIMEOUT_MS) {
     return { status: "done", result: mockTimeout(run.input, run.traceId) };
+  }
+
+  try {
+    await loadKbArticles();
+  } catch {
+    // Path B if the CSV cannot be read; selectMockResponse still runs.
   }
 
   return {

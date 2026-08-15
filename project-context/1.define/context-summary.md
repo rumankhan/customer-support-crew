@@ -4,7 +4,7 @@ Handoff brief from `@product-mgr` to `@system.arch` and Build personas.
 
 ## Product one-liner
 
-An orchestrated multi-agent helpdesk crew that classifies inquiries, retrieves grounded knowledge, personalizes responses, scores sentiment/risk, and escalates with full context — 24/7 chat support with human fallback.
+An orchestrated multi-agent helpdesk crew for **B-Mobile** (fictional mobile carrier) that classifies inquiries, retrieves grounded knowledge, personalizes responses, scores sentiment/risk, and escalates with full context — 24/7 chat support with human fallback.
 
 ## Course / complexity verdict
 

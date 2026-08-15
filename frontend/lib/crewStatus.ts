@@ -1,13 +1,9 @@
 import type { ChatResponse, RunPhase } from "./types";
+import { CREW_STATUS_LABEL } from "./uiCopy";
 
 export type CrewStatus = "idle" | "running" | "done" | "error";
 
-export const CREW_STATUS_LABEL: Record<CrewStatus, string> = {
-  idle: "Crew: idle",
-  running: "Crew: running",
-  done: "Crew: done",
-  error: "Crew: error",
-};
+export { CREW_STATUS_LABEL };
 
 /** Pill surface: gray idle, blue running, green done, red error. */
 export const CREW_STATUS_PILL: Record<CrewStatus, string> = {

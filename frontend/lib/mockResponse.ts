@@ -1,8 +1,9 @@
+import { searchKb } from "./kb";
 import type { ChatResponse, RunInput } from "./types";
 
 const RESEARCH_STEPS: ChatResponse["steps"] = [
-  { agent: "query_classifier", summary: "Classified intent and urgency" },
-  { agent: "knowledge_retriever", summary: "Searched local knowledge base" },
+  { agent: "query_classifier", summary: "Classified B-Mobile intent and urgency" },
+  { agent: "knowledge_retriever", summary: "Searched the B-Mobile help articles" },
   { agent: "response_specialist", summary: "Drafted a grounded reply or refused" },
   { agent: "escalation_manager", summary: "Scored risk and chose resolve vs escalate" },
 ];
@@ -14,17 +15,13 @@ function baseMeta(input: RunInput): ChatResponse["meta"] {
   };
 }
 
-export function mockResolvePasswordReset(input: RunInput, traceId: string): ChatResponse {
+export function mockResolveFromKb(input: RunInput, traceId: string): ChatResponse | null {
+  const hit = searchKb(input.query);
+  if (!hit) return null;
   return {
     decision: "resolve",
-    reply:
-      "To reset your Acme Cloud password, open Account → Security → Reset password and follow the email link. The link expires in 30 minutes.",
-    sources_used: [
-      {
-        title: "Reset your Acme Cloud password",
-        snippet: "Use Account → Security → Reset password. Links expire in 30 minutes.",
-      },
-    ],
+    reply: hit.article.body,
+    sources_used: [{ title: hit.article.title, snippet: hit.snippet }],
     sentiment: "neutral",
     risk: "low",
     reason_codes: ["grounded_kb_hit"],
@@ -42,11 +39,11 @@ export function mockEscalateUnknownTopic(input: RunInput, traceId: string): Chat
   return {
     decision: "escalate",
     reply:
-      "I don’t have that in my knowledge base, so I am sending this to a human specialist with the context I collected.",
+      "I don’t have that in the B-Mobile help articles, so I am sending this to a human specialist with the context I collected.",
     sources_used: [],
     sentiment: "neutral",
     risk: "medium",
-    reason_codes: ["kb_gap", "refused"],
+    reason_codes: ["retrieval_gap", "refused"],
     steps: RESEARCH_STEPS,
     trace_id: traceId,
     packet: {
@@ -55,10 +52,10 @@ export function mockEscalateUnknownTopic(input: RunInput, traceId: string): Chat
       customer_message: input.query,
       request_human: input.requestHuman,
       citations_attempted: [],
-      draft_reply: "I don’t have that in my knowledge base.",
+      draft_reply: "I don’t have that in the B-Mobile help articles.",
       sentiment: "neutral",
       risk: "medium",
-      reason_codes: ["kb_gap", "refused"],
+      reason_codes: ["retrieval_gap", "refused"],
       stub_ticket_id: stub,
     },
     stub_ticket_id: stub,
@@ -71,7 +68,7 @@ export function mockEscalateRequestHuman(input: RunInput, traceId: string): Chat
   const stub = `STUB-${traceId.slice(0, 8).toUpperCase()}`;
   return {
     decision: "escalate",
-    reply: "Connecting you with a human specialist. Your research context is attached.",
+    reply: "Connecting you with a B-Mobile specialist. Your account context is attached.",
     sources_used: [],
     sentiment: "negative",
     risk: "medium",
@@ -100,7 +97,7 @@ export function mockTimeout(input: RunInput, traceId: string): ChatResponse {
   const stub = `STUB-${traceId.slice(0, 8).toUpperCase()}`;
   return {
     decision: "escalate",
-    reply: "We could not complete this request. Please talk to a human.",
+    reply: "We could not complete this request. Please talk to a B-Mobile specialist.",
     sources_used: [],
     sentiment: "neutral",
     risk: "medium",
@@ -132,9 +129,5 @@ export function selectMockResponse(input: RunInput, traceId: string): ChatRespon
   if (input.requestHuman) {
     return mockEscalateRequestHuman(input, traceId);
   }
-  const q = input.query.toLowerCase();
-  if (q.includes("password") || q.includes("reset")) {
-    return mockResolvePasswordReset(input, traceId);
-  }
-  return mockEscalateUnknownTopic(input, traceId);
+  return mockResolveFromKb(input, traceId) ?? mockEscalateUnknownTopic(input, traceId);
 }

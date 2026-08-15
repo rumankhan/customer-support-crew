@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { startRun, getRunStatus } from "./api";
 import { deriveCrewStatus } from "./crewStatus";
 import { STAGE_LABELS, transitionRunPhase, type StageLabel } from "./fsm";
+import { UI } from "./uiCopy";
 import type { ChatResponse, HistoryEntry, RunInput, RunPhase } from "./types";
 
 const POLL_MS = 400;
@@ -103,11 +104,11 @@ export function useResearchWorkflow() {
       if (busyRef.current) return;
       const query = input.query.trim();
       if (!query) {
-        setError("Enter a research question to start a run.");
+        setError(UI.emptyError);
         return;
       }
       if (query.length > 4000) {
-        setError("Question must be 4000 characters or fewer.");
+        setError(UI.tooLongError);
         return;
       }
 
@@ -135,11 +136,16 @@ export function useResearchWorkflow() {
     [beginPolling, touchUpdated],
   );
 
-  const reset = useCallback(() => {
+  const startNewConversation = useCallback(() => {
     clearTimers();
     busyRef.current = false;
+    settledRef.current = false;
+    queryRef.current = "";
     setActiveRunId(null);
-    setPhase((p) => transitionRunPhase(p, { type: "RESET" }));
+    setResult(null);
+    setHistory([]);
+    setLastQuery("");
+    setPhase((p) => (p === "idle" ? p : transitionRunPhase(p, { type: "RESET" })));
     setStageLabel(STAGE_LABELS[0]);
     setError(null);
     setCrewFault(false);
@@ -164,7 +170,7 @@ export function useResearchWorkflow() {
     lastUpdated,
     crewStatus: deriveCrewStatus(phase, result, crewFault),
     submit,
-    reset,
+    startNewConversation,
     showHistory,
   };
 }

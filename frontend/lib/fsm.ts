@@ -9,7 +9,9 @@ export function transitionRunPhase(phase: RunPhase, event: RunEvent): RunPhase {
     case "idle":
       return event.type === "START" ? "running" : phase;
     case "running":
-      return event.type === "COMPLETE" ? "done" : phase;
+      if (event.type === "COMPLETE") return "done";
+      if (event.type === "RESET") return "idle";
+      return phase;
     case "done":
       if (event.type === "RESET") return "idle";
       if (event.type === "START") return "running";
@@ -20,10 +22,10 @@ export function transitionRunPhase(phase: RunPhase, event: RunEvent): RunPhase {
 }
 
 export const STAGE_LABELS = [
-  "Classifying",
-  "Retrieving",
-  "Composing",
-  "Triaging",
+  "Understanding your question",
+  "Searching help articles",
+  "Writing a reply",
+  "Checking next steps",
 ] as const;
 
 export type StageLabel = (typeof STAGE_LABELS)[number];

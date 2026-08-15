@@ -15,9 +15,9 @@ const sourceSerif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
-  title: "Critical Research Workflow",
+  title: "B-Mobile Support",
   description:
-    "Submit a research question and review a grounded result or a human escalation packet.",
+    "Ask B-Mobile about plans, billing, SIM, and devices. Get a grounded answer or a human handoff.",
 };
 
 export default function RootLayout({

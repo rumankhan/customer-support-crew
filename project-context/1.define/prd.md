@@ -2,7 +2,7 @@
 
 **Deep Research Report / MRD**: `project-context/1.define/mrd.md`  
 **System Description**: N/A (elicitation skipped; stakeholder concept + MRD used)  
-**System Concept**: Multi-Agent Customer Support Crew — specialized AI agents collaborate to classify inquiries, retrieve knowledge, analyze sentiment, manage escalations, and deliver personalized 24/7 support.  
+**System Concept**: Multi-Agent Customer Support Crew for **B-Mobile**, a fictional consumer mobile carrier — specialized AI agents classify inquiries, retrieve B-Mobile help articles, analyze sentiment, manage escalations, and deliver 24/7 chat support.  
 **Selected Runtime**: `crewai` (**locked** for course MVP)  
 **MVP user value (one sentence)**: A customer gets a grounded chat answer or a clean human escalation with full context — without waiting in a blind queue or talking to a black-box FAQ bot.
 
@@ -36,7 +36,7 @@
 
 ### Problem Statement
 
-Traditional helpdesks rely on overloaded human queues and brittle single-bot scripts that fail on multi-step, emotional, or knowledge-sparse inquiries. Industry evidence (see MRD) shows pure automation FCR is strong on transactional queries (≈60–70%) but weak on complex ones (≈28–40%), while failed bot-then-escalate paths can cut CSAT by ~22%. Mid-market and SaaS support teams need round-the-clock coverage without sacrificing escalation quality or compliance transparency (EU AI Act Art. 50 disclosure from 2026-08-02).
+Traditional helpdesks rely on overloaded human queues and brittle single-bot scripts that fail on multi-step, emotional, or knowledge-sparse inquiries. Industry evidence (see MRD) shows pure automation FCR is strong on transactional queries (≈60–70%) but weak on complex ones (≈28–40%), while failed bot-then-escalate paths can cut CSAT by ~22%. Mid-market support teams (this course demo: **B-Mobile** consumer wireless — plans, billing, SIM, roaming, devices) need round-the-clock coverage without sacrificing escalation quality or compliance transparency (EU AI Act Art. 50 disclosure from 2026-08-02).
 
 **Impact (research-backed ranges)**: Contained tickets can save ~USD 5.50–11.50 vs human-handled; AI programs commonly cite 25–40% cost reduction per interaction and positive ROI within ~18 months for many adopters — course demo uses qualitative script; production baselines optional.
 
@@ -53,9 +53,9 @@ A **Multi-Agent Customer Support Crew** runs four specialized roles — classifi
 - Course MVP on `crewai` (YAML agents/tasks)
 
 **Expected outcomes (MVP / course demo)**
-- Demo path A: in-KB FAQ → **resolve** with sources shown  
-- Demo path B: unknown topic → **refuse/escalate** (no fabrication)  
-- Demo path C: request human / high risk → **escalate** with packet  
+- Demo path A: `How do I reset my B-Mobile My Account PIN?` → **resolve** with sources shown  
+- Demo path B: `What is your quantum warranty for the hardware drone?` → **refuse/escalate** (no fabrication)  
+- Demo path C: request human (`request_human=true`) → **escalate** with packet  
 - Automated path targets (stretch): p95 < 30s; median first status < 10s  
 
 ### Strategic Rationale
@@ -84,7 +84,7 @@ Multi-agent architecture matches support work (route → research → reply → 
 **Journey (MVP)**  
 1. Customer opens chat → AI disclosure shown  
 2. Classifier labels intent + urgency  
-3. Retriever grounds on local KB  
+3. Retriever grounds on local B-Mobile KB (`backend/kb/articles.csv`)  
 4. Response Specialist drafts personalized reply **or refuses** if ungrounded  
 5. Escalation Manager scores text sentiment/risk → **resolve** or **escalate** with packet  
 6. Operator strip shows decision + reason codes from last `ChatResponse` *(CSAT prompt = P1 stub only)*
@@ -120,7 +120,7 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 - role: "Knowledge Base Research Specialist"  
 - goal: "Retrieve grounded passages with citations for the classified intent"  
 - tools: [`kb_search`]  
-- runtime notes: local/seed KB only; **TF-IDF / bag-of-words** (SAD ADR-13); floor `KB_SIMILARITY_FLOOR=0.35`; `output_pydantic: RetrieverOutput` — `{passages[], citations[], gap: bool}`
+- runtime notes: local/seed KB only — **`backend/kb/articles.csv`** (one B-Mobile FAQ per row: `id`, `title`, `body`); **TF-IDF / bag-of-words** (SAD ADR-13); floor `KB_SIMILARITY_FLOOR=0.35`; `output_pydantic: RetrieverOutput` — `{passages[], citations[], gap: bool}`
 
 **agent: response_specialist**  
 - role: "Customer Response Composer"  
@@ -143,7 +143,7 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 | Integration | MVP (course) | Deferred |
 |-------------|--------------|----------|
 | Chat UI ↔ Backend API | Required (Integration epic) | — |
-| Seed / local knowledge corpus | Required (files under repo; simple retriever) | Managed vector SaaS |
+| Seed / local knowledge corpus | Required: `backend/kb/articles.csv` (≥10 B-Mobile FAQ rows; simple retriever) | Managed vector SaaS |
 | Ticketing (Zendesk/etc.) | **Stub only** — no live third-party | Live connector (P1) |
 | CRM write actions | Out | P1+ |
 | Auth | Demo-safe: open chat; optional `OPERATOR_API_KEY` only if last-result polish is enabled | SSO/IAM |
@@ -240,23 +240,24 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 
 | Screen / region | MVP behavior | Placeholder (visible, non-functional) |
 |-----------------|--------------|----------------------------------------|
-| Chat page `/` | Message list, composer, send | — |
+| Chat page `/` | Chat window: You (right) / B-Mobile (left) bubbles; composer at bottom. Session thread is the transcript (no separate history list). | — |
 | AI disclosure banner | Always visible until acknowledged or persistent notice | — |
-| Status line | Optimistic local stage labels during wait (no streaming protocol) | Streaming tokens |
-| Result card | Final reply + sources or escalate notice | — |
-| Operator strip | Bound to last `ChatResponse` in UI state: decision, reason_codes, expand step summaries | Full history / metrics dashboard; optional `/api/last-result` |
-| “Talk to a human” | Sets flag / calls API with `request_human=true` | Live agent chat |
+| Status line | Under the chat: Ready / Looking that up / Finished; optimistic local stage labels while waiting (no streaming protocol) | Streaming tokens |
+| Reply | Last B-Mobile bubble: reply + sources or escalate notice | — |
+| Specialist strip | Bound to last `ChatResponse` in UI state: decision, reason_codes, expand step summaries | Full history / metrics dashboard; optional `/api/last-result` |
+| “I'd rather talk to a person” | Sets flag / calls API with `request_human=true` | Live agent chat |
+| Start new conversation | Clears the tab thread, specialist notes, and FSM → idle | Persistent history |
 | Voice / email tabs | — | Visible Future Work stubs |
 
 - Framework: Next.js App Router + Tailwind + TS (per FE persona defaults)
 - Responsive: usable at 375px and 1280px widths
 - Accessibility: keyboard send (Enter), focusable controls, contrast adequate for demo
 - **Visual direction (MVP):** light color theme (light backgrounds, dark text); modern web fonts via next/font or equivalent (avoid default system-only stacks for body/display); clean chat layout — no dark-mode default for MVP
-- FE epic **must not** call real backend until Integration epic (use mock data or disabled send documented in `frontend.md`)
+- FE epic **must not** call live CrewAI / `POST /api/chat` until Integration. Mock runs may read the same seed CSV (`backend/kb/articles.csv`) via a **non-product** loader (documented in `frontend.md`); Integration replaces that with `POST /api/chat`.
 - Visual implementation details live in `frontend.md`; behavior contracts remain in SAD §2
 
 ### Agent Interaction Design
-- **StatusLine UX contract (non-streaming):** On send, cycle “Classifying… Retrieving… Composing… Triaging…” on a **local timer**. On response, stop animation and render reply + authoritative `steps[]`. On error/timeout, stop animation and show safe message + escalate CTA. Do **not** invent SSE/WebSocket/streaming in MVP.
+- **StatusLine UX contract (non-streaming):** On send, cycle “Understanding your question → Searching help articles → Writing a reply → Checking next steps” on a **local timer** (also shown in a pending B-Mobile bubble). On response, stop animation and render the reply in chat + authoritative `steps[]` in the specialist strip. On error/timeout, stop animation and show a safe message + escalate CTA. Do **not** invent SSE/WebSocket/streaming in MVP.
 - Errors: human-readable + escalate CTA
 - Explainability: short rationale + sources for operators; customers see source titles when resolving
 - Operator strip: prefer UI state from last chat response for grading; `/api/last-result` optional polish
@@ -311,7 +312,7 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 | Week | Dates (2026) | Build epic(s) | Persona | Deliverables | Status |
 |------|--------------|---------------|---------|--------------|--------|
 | 1 | Aug 1–7 | **Architecture** + **Setup** | `@system.arch`, `@project.mgr` | `sad.md`, scaffold, `.env.example`, `setup.md` | Assumed started/complete |
-| 2 | Aug 8–14 | **Backend** (Module 1 — crew) | `@backend.eng` | Named `output_pydantic` models; `agents.yaml` / `tasks.yaml`; offline `kickoff()`; seed ≥10 FAQs | **Current** |
+| 2 | Aug 8–14 | **Backend** (Module 1 — crew) | `@backend.eng` | Named `output_pydantic` models; `agents.yaml` / `tasks.yaml`; offline `kickoff()`; seed `articles.csv` ≥10 rows | **Current** |
 | 3 | Aug 15–21 | **Backend** (API) + **thin FE** | `@backend.eng`, `@frontend.eng` | `POST /api/chat` vertical slice; Next.js chat shell (reply + Talk-to-human); optimistic StatusLine | Upcoming |
 | 4 | Aug 22–28 | **FE polish** + **Integration** | `@frontend.eng`, `@integration.eng` | Operator strip, disclosure polish, Future Work stubs; FE↔BE wire from last `ChatResponse` | Upcoming |
 | 5 | Aug 29–Sep 4 | **QA** (+ security recommended) | `@qa.eng`, `@security.eng` | `qa.md` vs `AC-*`; `security.md` | Upcoming |
@@ -327,7 +328,7 @@ POST /api/chat (+ optional request_human)
   → UI shows reply + Talk-to-human CTA
 ```
 
-Demo paths A/B/C must pass against ≥10 FAQ KB. Defer StatusLine polish, OperatorStrip expand, disclosure edge cases, Future Work stubs, and `/api/last-result` until after this slice works.
+Demo paths A/B/C must pass against ≥10 FAQ **rows** in `backend/kb/articles.csv`. Defer StatusLine polish, OperatorStrip expand, disclosure edge cases, Future Work stubs, and `/api/last-result` until after this slice works.
 
 ### Development Phases (mapped to weeks)
 1. **Define / Architecture / Setup** (Week 1): MRD ✓, PRD ✓ → SAD/SFS + stories + scaffold  
@@ -336,7 +337,7 @@ Demo paths A/B/C must pass against ≥10 FAQ KB. Defer StatusLine polish, Operat
 
 ### Resource Requirements
 - Cross-functional AAMAD persona sequence; Friday checkpoints Weeks 2–6.
-- Seed FAQ/KB (≥10 articles) committed in-repo by end of Week 2.
+- Seed FAQ/KB (`backend/kb/articles.csv`, ≥10 B-Mobile rows) committed in-repo by end of Week 2.
 
 ### Risk Mitigation
 | Risk | Mitigation |
@@ -353,7 +354,7 @@ Demo paths A/B/C must pass against ≥10 FAQ KB. Defer StatusLine polish, Operat
 ## 9. Launch & Go-to-Market Strategy
 
 Optional product GTM (not required for course demo):  
-- Pilot with seed KB product FAQs  
+- Pilot with B-Mobile seed KB (`articles.csv`)  
 - Show resolve vs escalate with packet in demo script  
 - Position as multi-agent crew teaching/demo system  
 - Pricing N/A for course deliverable
@@ -379,7 +380,7 @@ Sufficient detail for each of the six Build-stage epics. Personas must not inven
 ### 10.2 Setup (`@project.mgr` → `setup.md`)
 
 **Must create (no business logic)**
-- Folders: e.g. `backend/`, `frontend/`, `backend/config/`, `backend/kb/` (seed FAQs), `project-context/2.build/`  
+- Folders: e.g. `backend/`, `frontend/`, `backend/config/`, `backend/kb/articles.csv` (seed FAQs), `project-context/2.build/`  
 - Dependency manifests only (Python + Node) per SAD  
 - `.env.example` entries (names only):
 
@@ -395,6 +396,7 @@ Sufficient detail for each of the six Build-stage epics. Personas must not inven
 | `OPERATOR_API_KEY` | Optional operator panel gate |
 | `LOG_DIR` | Default `project-context/2.build/logs` |
 | `KB_DIR` | Default `backend/kb` |
+| `KB_FILE` | Default `articles.csv` (one FAQ per row: `id`, `title`, `body`) |
 | `CLASSIFIER_CONFIDENCE_MIN` | Default `0.55` |
 | `KB_SIMILARITY_FLOOR` | Default `0.35` |
 
@@ -405,7 +407,7 @@ Sufficient detail for each of the six Build-stage epics. Personas must not inven
 **Must implement**
 - `config/agents.yaml` + `config/tasks.yaml` for the 4 agents / 4 tasks with named `output_pydantic` models: `ClassifierOutput`, `RetrieverOutput`, `ResponseOutput`, `EscalationOutput` (+ nested `EscalationPacket`) per SAD §2  
 - `crew.py` (or equiv.) sequential process; `memory=False`; `max_iter≤12`; bind agent LLMs via **SAD ADR-19 tiers** (`low`×3, `mid` for `response_specialist`) — not four separate model envs  
-- Tool `kb_search` over local seed KB (≥10 FAQs covering demo A/B): **TF-IDF / bag-of-words** cosine per SAD ADR-13; floor `KB_SIMILARITY_FLOOR=0.35`; tool `ticket_stub` no-op/in-memory  
+- Tool `kb_search` over local seed KB (`backend/kb/articles.csv`, ≥10 FAQ rows covering demo A/B): **TF-IDF / bag-of-words** cosine per SAD ADR-13; floor `KB_SIMILARITY_FLOOR=0.35`; tool `ticket_stub` no-op/in-memory  
 - HTTP API (schemas authoritative in **SAD §2**; keep paths stable):
 
 **`POST /api/chat`**
@@ -453,22 +455,23 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 
 ### 10.4 Frontend (`@frontend.eng` → `frontend.md`)
 
-**Must implement (UI only — no live BE wiring)**
-- Next.js chat page with disclosure banner (`AC-01`)  
-- Composer, message list, **optimistic local StatusLine** (Classifying → Retrieving → Composing → Triaging on a timer; stop on mock/response — **no streaming protocol**)  
-- Result/escalate card + Talk-to-human CTA bound to mock `ChatResponse`  
-- Operator strip UI bound to **last mock/response `ChatResponse` in UI state** (not a second API path)  
-- Visible stubs: Voice tab, CSAT dashboard, “Live ticketing” badge (non-functional) — **after** thin chat shell works  
+**Must implement (UI only — no live CrewAI / `POST /api/chat`)**
+- Next.js page at `/` with B-Mobile disclosure banner (`AC-01`)  
+- Chat window + composer (question, **I'd rather talk to a person**, **Get help**, **Start new conversation** when a thread exists)  
+- **Optimistic local StatusLine** under the chat (Understanding your question → Searching help articles → Writing a reply → Checking next steps; stop on mock/response — **no streaming protocol**)  
+- Reply in B-Mobile bubbles + specialist strip bound to mock `ChatResponse` in UI state (not a second product API path)  
+- **Mock KB loading (FE epic only):** retrieve from canonical `backend/kb/articles.csv` (keyword overlap, floor `0.35`) so Path A/B match SAD demo queries. A Next.js `GET /api/kb` that reads that file is a **stub loader**, not a product endpoint; Integration must not keep it as the chat API.  
+- Visible stubs: Voice, CSAT dashboard, Live ticketing (non-functional)  
 - Tailwind responsive layout  
 
-**Prohibited:** calling real backend; implementing auth/SSO; inventing SSE/WebSocket streaming  
+**Prohibited:** calling live FastAPI/`POST /api/chat` before Integration; implementing auth/SSO; inventing SSE/WebSocket streaming  
 
 **Exit:** `frontend.md` notes mock vs future Integration hook points; StatusLine contract documented
 
 ### 10.5 Integration (`@integration.eng` → `integration.md`)
 
 **Must implement**
-- Wire FE send → `POST /api/chat` using `NEXT_PUBLIC_API_BASE_URL` (single MVP path)  
+- Wire FE send → `POST /api/chat` using `NEXT_PUBLIC_API_BASE_URL` (single MVP path); stop using mock `GET /api/kb` for answers  
 - Map response fields into chat + operator strip from **last `ChatResponse`**  
 - Error envelope → user-visible message + escalate CTA (`AC-06b`)  
 - Verify happy path resolve + escalate (`request_human=true` and low-confidence / gap path)  
@@ -530,7 +533,7 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 - “Learns and adapts” = analytics + human-approved KB/prompt updates post-MVP — **not** in 6-week build.
 - **Ticketing is stub-only** for course MVP (no live third-party) — resolves prior Open Question for Build.
 - **Runtime locked to `crewai`** for this course delivery unless operator overrides before Backend Week 2 ends.
-- English-only seed KB; ≥10 FAQ docs in-repo covering demo paths A/B.
+- English-only seed KB; ≥10 FAQ **rows** in `backend/kb/articles.csv` covering demo paths A/B for **B-Mobile** (PIN, billing, shipping, returns, plan, email, plus roaming/eSIM/etc.).
 - Sentiment is text-only inside `escalation_manager` (4-agent cap).
 - **Non-streaming JSON** API for MVP; StatusLine uses **optimistic local stage animation**; streaming UI is a visible stub only.
 - Retrieval provisional default: **TF-IDF / bag-of-words**; `KB_SIMILARITY_FLOOR=0.35` (SAD ADR-13); tune without topology change.
@@ -545,12 +548,13 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 ## Open Questions
 
 1. ~~Exact LLM model string~~ — **Resolved (SAD ADR-19):** tier map — `OPENAI_MODEL_LOW` default `gpt-4.1-nano` (3 agents), `OPENAI_MODEL_MID` default `gpt-4.1-mini` (`response_specialist`); `OPENAI_MODEL` fallback `gpt-4o-mini`. Backend records resolved map in Audit.  
-2. Disclosure legal copy owner (use generic: “You are chatting with an AI assistant”) until provided.  
+2. Disclosure legal copy owner (working default: “You are chatting with the B-Mobile AI assistant”) until instructor copy is provided.  
 3. Confirm Week-1 `sad.md` / `setup.md` already exist on disk or must be produced ASAP in Week 2.  
 4. Preferred monorepo layout names if instructor template differs (`apps/web` vs `frontend`).  
 5. Whether `@security.eng` is graded/required for this course section or optional.  
 6. Baseline CSAT metrics — N/A for course demo; use qualitative demo script instead.
 7. GDPR / Prompt Trace retention duration (days).
+8. ~~Form + results vs chat bubbles~~ — **Resolved:** `/` is a chat window (You right / B-Mobile left); stub contracts unchanged.
 
 ## Audit
 
@@ -562,4 +566,36 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 | Prior action | sharpen-prd (UX visual direction: light theme + modern fonts) @ 2026-08-13T07:41:00-05:00 |
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai (locked for course MVP) |
 | Prompt Trace | Omitted — requirements synthesis; no secrets |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-15T11:00:00-05:00 |
+| Persona id | product-mgr |
+| Action | update-prd (demo use case → B-Mobile consumer wireless) |
 | Change note | Tier envs OPENAI_MODEL_LOW/MID; OQ #1 resolved via SAD ADR-19; Backend binds by tier |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-15T11:55:00-05:00 |
+| Persona id | product-mgr |
+| Action | update-prd (seed KB format → single `articles.csv`) |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-15T12:00:00-05:00 |
+| Persona id | product-mgr |
+| Action | update-prd (B-Mobile CSV KB loading: `kb_search` vs FE mock `GET /api/kb`; form+results UI) |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-15T17:30:00-05:00 |
+| Persona id | product-mgr |
+| Action | update-prd (§6 / §10.4 chat window, Get help, Start new conversation, specialist strip) |

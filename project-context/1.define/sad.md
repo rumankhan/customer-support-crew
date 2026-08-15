@@ -13,7 +13,9 @@
 
 ### System description
 
-The Multi-Agent Customer Support Crew is a chat-first MVP that runs four specialized CrewAI agents in a sequential pipeline so a customer receives either a **knowledge-grounded answer with citations** or a **clean human escalation with a full context packet**. It is an orchestration layer for demo/course delivery—not a CCaaS or live ticketing suite replacement (MRD/PRD).
+The Multi-Agent Customer Support Crew is a chat-first MVP that runs four specialized CrewAI agents in a sequential pipeline so a **B-Mobile** customer (fictional consumer mobile carrier) receives either a **knowledge-grounded answer with citations** or a **clean human escalation with a full context packet**. It is an orchestration layer for demo/course delivery—not a CCaaS or live ticketing suite replacement (MRD/PRD).
+
+**Demo domain:** B-Mobile prepaid/postpaid consumer support — plans, billing, SIM/eSIM, roaming, device orders, number porting. Not a SaaS product FAQ bot.
 
 **MVP user value:** grounded resolve **or** trustworthy handoff—without a blind queue or black-box FAQ bot.
 
@@ -34,18 +36,18 @@ The Multi-Agent Customer Support Crew is a chat-first MVP that runs four special
 
 | Interface | Direction | Contract |
 |-----------|-----------|----------|
-| Web chat UI (`/`) | Customer ↔ Frontend | Disclosure, composer, stage labels, result/escalate card, operator strip |
+| Web chat UI (`/`) | Customer ↔ Frontend | Disclosure, chat window, composer, stage labels, specialist strip |
 | `POST /api/chat` | Frontend ↔ Backend | Non-streaming JSON request/response (primary resolve path) |
 | `GET /health` | Ops / CI ↔ Backend | `{ "status": "ok" }` |
 | `GET /api/last-result` | Operator UI ↔ Backend (optional polish) | Last in-memory `ChatResponse`; **not** required for AC-05 |
 | CrewAI `kickoff` | FastAPI ↔ Runtime | Inputs `{message, request_human}`; sequential task outputs |
-| `kb_search` | Retriever ↔ Local KB files | Query → passages / gap |
+| `kb_search` | Retriever ↔ `backend/kb/articles.csv` | Query → passages / gap (one row = one FAQ) |
 | `ticket_stub` | Escalation ↔ In-memory stub | Packet → `{ticket_id: "STUB-…"}` |
 | LLM provider API | CrewAI ↔ External | Completions via env-configured key/model |
 
 ```
 Browser (Next.js) ──POST /api/chat──► FastAPI ──kickoff──► CrewAI (4 agents)
-                                              │                 ├─ kb_search (local)
+                                              │                 ├─ kb_search (articles.csv)
                                               │                 └─ ticket_stub
                                               ▼
                                     ChatResponse + Prompt Trace
@@ -81,32 +83,42 @@ Browser (Next.js) ──POST /api/chat──► FastAPI ──kickoff──► C
 
 | Component | Responsibility | Owner epic |
 |-----------|----------------|------------|
-| Chat UI (Next.js) | Disclosure, composer, stage labels, result/escalate card, operator strip, Future Work stubs | Frontend |
+| Chat UI (Next.js) | B-Mobile form+results, disclosure, stage labels, operator strip, Future Work stubs | Frontend |
 | API client (`lib/api.ts`) | Mock in FE epic; live `fetch` to `/api/chat` in Integration | FE → Integration |
 | FastAPI gateway | Validate request; CORS; invoke crew; map response; health; optional last-result | Backend |
 | CrewAI runtime (`customer_support_crew`) | Sequential 4-agent pipeline from YAML | Backend |
-| `kb_search` | Local file retrieval over `backend/kb/` (≥10 seed FAQs) | Backend |
+| `kb_search` | Local CSV retrieval over `backend/kb/articles.csv` (≥10 seed FAQ rows) | Backend |
+| FE mock KB loader | **FE epic only:** `GET /api/kb` reads the same CSV for stub Path A/B. **Not** a product API; Integration replaces with `POST /api/chat` + crew `kb_search`. | Frontend (temporary) |
 | `ticket_stub` | In-memory stub ticket id for escalate path | Backend |
 | Prompt Trace store | `{LOG_DIR}/{trace_id}.json` (redact secrets/PII) | Backend |
 | LLM provider | Model completion via CrewAI / OpenAI SDK | External |
 
-**Data (MVP):** no persistent DB. Seed KB = files under `backend/kb/`. Optional process-local `last_result` (lost on restart). `session_id` opaque/optional only.
+**Data (MVP):** no persistent DB. Seed KB = `backend/kb/articles.csv` (one FAQ per row). Optional process-local `last_result` (lost on restart). `session_id` opaque/optional only.
 
 ### Frontend logical structure
 
 - **Stack:** Next.js App Router, TypeScript, Tailwind; React local state (no Redux).
 - **Types:** `ChatRequest` / `ChatResponse` mirroring backend schema (incl. optional `meta` for AC-01b).
-- **Boundary:** `@frontend.eng` uses **mock** responses; `@integration.eng` wires `NEXT_PUBLIC_API_BASE_URL`.
+- **Boundary:** `@frontend.eng` uses **mock** `ChatResponse` payloads; stub retrieval reads the **same** `backend/kb/articles.csv` as Backend `kb_search` will. `@integration.eng` wires `NEXT_PUBLIC_API_BASE_URL` + `POST /api/chat` and must not treat `GET /api/kb` as the chat contract.
 
 ```
 frontend/
-  app/page.tsx                 # Chat + disclosure + operator strip
-  components/                  # DisclosureBanner, ChatMessageList, ChatComposer,
-                               # StatusLine, ResultCard, OperatorStrip, FutureWorkStubs
-  lib/types.ts, api.ts, mockResponse.ts
+  app/page.tsx                 # Disclosure, ChatWindow, RunStatus, SpecialistStrip
+  app/api/kb/route.ts          # Mock-only: serve articles.csv (not POST /api/chat)
+  components/                  # ChatWindow, InputsForm, RunStatus,
+                               # SpecialistStrip, DisclosureBanner, FutureWorkStubs
+  lib/types.ts, api.ts, mockResponse.ts, kb.ts, uiCopy.ts
 ```
 
-**UI requirements:** sources on resolve; escalate CTA on error; Talk-to-human always available; responsive 375px / 1280px. Accessibility from PRD: keyboard send (Enter), focusable controls, adequate contrast for demo.
+**KB loading (locked)**
+
+| Layer | How the corpus is read |
+|-------|------------------------|
+| Canonical file | `backend/kb/articles.csv` — columns `id`, `title`, `body`; one FAQ per row; RFC4180 quoting |
+| Backend (`kb_search`) | Load `{KB_DIR}/{KB_FILE}` (defaults `backend/kb` + `articles.csv`). Each row is one document. Score with TF-IDF / bag-of-words (or keyword overlap); floor `KB_SIMILARITY_FLOOR=0.35` → `gap=true` |
+| Frontend mocks (until Integration) | `searchKb()` in `lib/kb.ts` over rows fetched from mock `GET /api/kb` (reads that CSV from disk). Path A hit / Path B miss must match the canonical demo queries below |
+
+**UI requirements:** sources on resolve; escalate CTA on error; **I'd rather talk to a person** always available in the composer; responsive 375px / 1280px. Accessibility from PRD: keyboard send (Enter), focusable controls, adequate contrast for demo. Layout is a **chat window** (You right / B-Mobile left) plus Status under the chat and a **For specialists** strip. Stub I/O (`ChatRequest` / `ChatResponse`) is unchanged. **Start new conversation** clears the in-tab thread (SAD DB/history remains Future Work).
 
 **Visual direction (from PRD §6):** light color theme; modern fonts (e.g. via `next/font`); MVP defaults to light mode. SAD owns behavior contracts only — detailed styling belongs in `frontend.md`.
 
@@ -114,7 +126,7 @@ frontend/
 
 | Event | Behavior |
 |-------|----------|
-| On send | Optimistic/local stage animation cycles Classifying → Retrieving → Composing → Triaging on a client timer |
+| On send | Optimistic/local stage animation cycles Understanding your question → Searching help articles → Writing a reply → Checking next steps on a client timer |
 | First stage | UI must show the first stage label within **10s of send** (local), not “first agent finished &lt;10s” |
 | On response | Stop animation; render reply + authoritative `steps[]` |
 | On error/timeout | Stop animation; safe message + Talk-to-human CTA (FE abort **50–60s**) |
@@ -361,7 +373,7 @@ On **resolve**, `EscalationOutput.packet` is `null` (or omitted) and mapper sets
 | Request disclosure fields | `meta` |
 | Exception / timeout path | `error` + escalate envelope; **minimal packet** when possible (see AC-06b policy) |
 
-**Retrieval default (MVP locked — ADR-13):** **TF-IDF / bag-of-words cosine** (or equivalent keyword overlap) over `backend/kb/` — **no embedding dependency required** for Week 2–3 vertical slice. Floor **`KB_SIMILARITY_FLOOR=0.35`** (env override). No passage above floor → `gap=true` on `RetrieverOutput`. Optional hybrid embedding may be added later **without** changing crew topology; record algorithm + floor in `backend.md` Audit.
+**Retrieval default (MVP locked — ADR-13):** **TF-IDF / bag-of-words cosine** (or equivalent keyword overlap) over `backend/kb/articles.csv` — **no embedding dependency required** for Week 2–3 vertical slice. Floor **`KB_SIMILARITY_FLOOR=0.35`** (env override). No passage above floor → `gap=true` on `RetrieverOutput`. Optional hybrid embedding may be added later **without** changing crew topology; record algorithm + floor in `backend.md` Audit.
 
 **Prompt Trace minimum schema (`AC-02c`)** — write `{LOG_DIR}/{trace_id}.json` (redact secrets/PII; never store API keys):
 
@@ -377,23 +389,25 @@ On **resolve**, `EscalationOutput.packet` is `null` (or omitted) and mapper sets
 | `error` | yes when failure — `{code, message}` or `null` on success |
 | `model` / tier map | recommended — resolved `{low, mid}` model ids |
 | Raw LLM prompts | optional; redact if present |
-**Seed KB contract (`backend/kb/`)**
+
+**Seed KB contract (`backend/kb/articles.csv`)**
 
 | Rule | Value |
 |------|--------|
-| Count | ≥ **10** FAQ files |
-| Format | One FAQ per file; Markdown (`.md`); first `#` heading = title; body = answer text |
-| Naming | `NN-slug.md` (e.g. `01-password-reset.md`) |
-| Domain | Fictional product **“Acme Cloud”** (SaaS) — English only |
-| Path A (hit) | FAQs must cover password reset, billing/invoice, shipping/delivery ETA, returns/refunds, plan upgrade, account email change |
+| Count | ≥ **10** FAQ **rows** |
+| Format | One CSV file; one FAQ per row; columns `id`, `title`, `body` (RFC4180 quoting) |
+| Naming | `articles.csv` (e.g. `id` = `01-account-pin`) |
+| Domain | Fictional carrier **“B-Mobile”** (consumer mobile) — English only |
+| Path A (hit) | FAQs must cover My Account PIN reset, billing/invoice, device shipping/ETA, returns/refunds, plan upgrade, account email change (plus roaming, eSIM, lost/stolen, porting, voicemail, data usage) |
 | Path B (miss) | No FAQ for demo query about **quantum warranty on physical hardware** (or equivalent out-of-corpus topic) |
 | Path C | Driven by `request_human=true` (primary); high risk optional — do not rely on negative-only |
+| Loader | Backend `kb_search` reads this file. FE mocks may read the same file (not a second corpus). |
 
 **Canonical demo queries (QA / Integration)**
 
 | Path | Example user message | Expected |
 |------|----------------------|----------|
-| A | `How do I reset my Acme Cloud password?` (keep **neutral**; avoid angry wording) | `decision=resolve`, non-empty `sources_used`, `packet=null` |
+| A | `How do I reset my B-Mobile My Account PIN?` (keep **neutral**; avoid angry wording) | `decision=resolve`, non-empty `sources_used`, `packet=null` |
 | B | `What is your quantum warranty for the hardware drone?` | `decision=escalate` (never resolve-only refuse), `reason_codes` include `retrieval_gap` and/or `refused`, `packet` + `stub_ticket_id` present |
 | C | `I want to talk to a human now — this billing charge is ridiculous!` with `request_human=true` | `decision=escalate`, `reason_codes` include `request_human`, full `steps[]` (4), `packet` + `stub_ticket_id` |
 
@@ -451,14 +465,14 @@ Tool failure on `kb_search` → treat as `gap=true` and continue (prefer escalat
 | Frontend host | `next dev` / `next start` | 3000 | Load `/` |
 | Optional compose | services `frontend`, `backend` | published 3000/8000 | same |
 
-**Local run:** Terminal A = uvicorn; Terminal B = Next.js. Seed KB ≥10 `NN-slug.md` FAQs under `backend/kb/` (Acme Cloud; demo queries A/B/C) by Week 2 exit.
+**Local run:** Terminal A = uvicorn; Terminal B = Next.js. Seed KB ≥10 FAQ rows in `backend/kb/articles.csv` (B-Mobile; demo queries A/B/C) by Week 2 exit.
 
 ### External systems and integration points
 
 | System | MVP role | Notes |
 |--------|----------|-------|
 | LLM provider (OpenAI-compatible) | Required | HTTPS via CrewAI; `OPENAI_API_KEY` |
-| Local filesystem KB | Required | `KB_DIR` / `backend/kb/` |
+| Local filesystem KB | Required | `{KB_DIR}/{KB_FILE}` → `backend/kb/articles.csv` |
 | Prompt Trace directory | Required | `LOG_DIR` → `project-context/2.build/logs` |
 | Zendesk / Intercom / CRM | **Out** | Stub only (`ticket_stub`) |
 | Managed vector DB / email / voice | **Out** | Future Work |
@@ -475,7 +489,7 @@ Tool failure on `kb_search` → treat as `gap=true` and continue (prefer escalat
 frontend/          # Next.js
 backend/           # FastAPI + CrewAI
   config/          # agents.yaml, tasks.yaml
-  kb/              # seed FAQs
+  kb/              # articles.csv seed FAQs
   crew.py          # kickoff entrypoint
   main.py          # HTTP API
 .env.example       # secret names only
@@ -495,7 +509,8 @@ project-context/2.build/logs/   # Prompt Trace (runtime)
 | `NEXT_PUBLIC_API_BASE_URL` | FE → API base |
 | `OPERATOR_API_KEY` | Optional gate for `/api/last-result` (`X-Operator-Key`) |
 | `LOG_DIR` | Default `project-context/2.build/logs` |
-| `KB_DIR` | Default `backend/kb` |
+| `KB_DIR` | Default `backend/kb` (load `articles.csv` from this directory) |
+| `KB_FILE` | Default `articles.csv` |
 | `CLASSIFIER_CONFIDENCE_MIN` | Default `0.55` |
 | `KB_SIMILARITY_FLOOR` | Default `0.35` (TF-IDF / keyword retrieval gap floor) |
 
@@ -610,11 +625,11 @@ Runtime checks: YAML loads; four step summaries; Prompt Trace for `trace_id`; es
 | ADR-06 | **No database** | Backend prohibition; opaque optional `session_id` |
 | ADR-07 | Repo layout = `frontend/` + `backend/` | PRD §10.2; clear epic ownership |
 | ADR-08 | LLM access via **model tiers** (not one global model for all agents) — see ADR-19 | Cost vs quality; closes PRD OQ #1 for Build |
-| ADR-09 | KB = **local files** under `backend/kb/` (≥10 FAQs) | No external vector SaaS in MVP |
+| ADR-09 | KB = **local CSV** `backend/kb/articles.csv` (≥10 FAQ rows) | No external vector SaaS in MVP |
 | ADR-10 | Process = **sequential**; no delegation; no memory | Determinism; adapter baseline |
 | ADR-11 | Fail-open to human on LLM/KB/timeout | PRD reliability; MRD degrade-to-human |
 | ADR-12 | Text-only sentiment; no biometric emotion | MRD/PRD compliance; EU AI Act risk posture |
-| ADR-13 | KB retrieval = **TF-IDF / bag-of-words cosine** (no embedding hard-dep for MVP); floor **0.35**; seed FAQs as `NN-slug.md` under `backend/kb/` | Close prior OQ #3; demo-stable Week 3; optional embedding later without topology change |
+| ADR-13 | KB retrieval = **TF-IDF / bag-of-words cosine** (no embedding hard-dep for MVP); floor **0.35**; seed FAQs as rows in `backend/kb/articles.csv` | Close prior OQ #3; demo-stable Week 3; optional embedding later without topology change |
 | ADR-14 | Operator strip from **last ChatResponse UI state**; `/api/last-result` optional polish | Close prior OQ #2; single Integration path for MVP |
 | ADR-15 | StatusLine = **optimistic local stage animation** until non-streaming JSON returns; FE abort **50–60s** | No streaming protocol in MVP; first stage label &lt;10s of send |
 | ADR-16 | Refuse/gap → final **`decision=escalate`** only (never resolve-only refuse); Path B locked | AC-03 groundedness + packet for humans |
@@ -651,7 +666,7 @@ POST /api/chat
 
 1. **Setup** (`@project.mgr`): `frontend/`, `backend/`, `backend/config/`, `backend/kb/`, `.env.example`, manifests; `setup.md` — **no business logic**.  
 2. **Backend** (`@backend.eng`): YAML agents/tasks with named `output_pydantic` models, tools (`kb_search` per ADR-13), `crew.kickoff`, FastAPI `POST /api/chat` + `/health` — **vertical slice first**.  
-3. **Frontend** (`@frontend.eng`): thin chat shell (composer, reply, Talk-to-human, optimistic StatusLine) + mocks shaped like `ChatResponse`; polish strip/stubs after Integration smoke.  
+3. **Frontend** (`@frontend.eng`): chat window + mocks shaped like `ChatResponse`; stub Path A/B from `articles.csv`; specialist strip/stubs after Integration smoke.  
 4. **Integration** (`@integration.eng`): wire `lib/api.ts` to `/api/chat` only; map last response into chat + operator strip; verify resolve + escalate.  
 5. **QA** (`@qa.eng`): unit + integration + AC-01…06 in `qa.md`.  
 6. **Deliver** (`@devops.eng`): CI + deploy.md + user-guide — no app logic changes.
@@ -711,7 +726,7 @@ POST /api/chat
 - `OPENAI_API_KEY` (or compatible provider configured for CrewAI) available at runtime.  
 - Folder names `frontend/` and `backend/` acceptable unless instructor mandates otherwise (PRD OQ #4).  
 - MVP retrieval = **TF-IDF / bag-of-words** per ADR-13; embedding optional post-slice; managed vector SaaS deferred.  
-- Seed KB = hand-authored Acme Cloud Markdown FAQs (`NN-slug.md`); not auto-generated; demo queries A/B/C locked in §2.  
+- Seed KB = hand-authored B-Mobile CSV (`articles.csv`, one FAQ per row); not auto-generated; demo queries A/B/C locked in §2.  
 - `sentiment` enum = `positive|neutral|negative`; `risk` / `urgency` enums = `low|medium|high`; escalate per ADR-17 (not negative-alone).  
 - `ChatResponse.packet` / `stub_ticket_id` required on escalate (including Path B refuse path and preferred on AC-06b failures); `null` on resolve.  
 - `refused` / `gap` never produce `decision=resolve` (ADR-16).  
@@ -737,7 +752,7 @@ POST /api/chat
 5. Public hosting target for Week 6 (local-only vs single cloud VM).  
 6. Disclosure UX: acknowledge-to-dismiss vs always-persistent banner — either OK; FE documents choice in `frontend.md`.  
 7. GDPR / Prompt Trace retention duration (days) for course machines.  
-8. Legal disclosure copy owner (generic “You are chatting with an AI assistant” until provided — PRD OQ #2).  
+8. Legal disclosure copy owner (working default: “You are chatting with the B-Mobile AI assistant” — PRD OQ #2).  
 9. ~~Refuse vs escalate / sentiment gate / timeout HTTP~~ — **Resolved (ADR-16…18).**  
 10. ~~Per-agent vs tiered models~~ — **Resolved (ADR-19):** `OPENAI_MODEL_LOW` / `OPENAI_MODEL_MID` + agent→tier map.
 
@@ -758,3 +773,43 @@ POST /api/chat
 | Adapter rule | `.cursor/rules/adapter-crewai.mdc` |
 | Warning | None — runtime resolved cleanly to crewai |
 | Change note | Review-only Audit append; no architectural content change |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-15T11:00:00-05:00 |
+| Persona id | system-arch |
+| Action | update-sad (demo domain → B-Mobile consumer wireless; seed KB contract + Path A query) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Prompt Trace | Omitted |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-15T11:55:00-05:00 |
+| Persona id | system-arch |
+| Action | update-sad (seed KB format → single `articles.csv`) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Prompt Trace | Omitted |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-15T12:00:00-05:00 |
+| Persona id | system-arch |
+| Action | update-sad (KB loading: `articles.csv` + FE mock `GET /api/kb` vs crew `kb_search`; form+results FE tree) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Prompt Trace | Omitted |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-15T17:30:00-05:00 |
+| Persona id | system-arch |
+| Action | update-sad (FE tree: ChatWindow + SpecialistStrip; chat layout; Start new conversation) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Prompt Trace | Omitted |

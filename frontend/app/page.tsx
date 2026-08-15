@@ -1,13 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { CrewStatusBanner } from "@/components/CrewStatusBanner";
+import { ChatWindow } from "@/components/ChatWindow";
 import { DisclosureBanner } from "@/components/DisclosureBanner";
 import { FutureWorkStubs } from "@/components/FutureWorkStubs";
-import { HistoryList } from "@/components/HistoryList";
-import { InputsForm } from "@/components/InputsForm";
-import { ResultsPanel } from "@/components/ResultsPanel";
 import { RunStatus } from "@/components/RunStatus";
+import { SpecialistStrip } from "@/components/SpecialistStrip";
 import { useResearchWorkflow } from "@/lib/useResearchWorkflow";
 
 export default function HomePage() {
@@ -16,23 +14,30 @@ export default function HomePage() {
   const [requestHuman, setRequestHuman] = useState(false);
   const [disclosureAcknowledged, setDisclosureAcknowledged] = useState(false);
 
+  function handleSubmit() {
+    const trimmed = query.trim();
+    workflow.submit({
+      query,
+      requestHuman,
+      disclosureAcknowledged,
+    });
+    if (trimmed && trimmed.length <= 4000) {
+      setQuery("");
+    }
+  }
+
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-4 px-4 py-8 sm:px-6">
-      <CrewStatusBanner
-        status={workflow.crewStatus}
-        lastUpdated={workflow.lastUpdated}
-        stageLabel={workflow.stageLabel}
-      />
-
       <header>
         <p className="text-xs font-semibold uppercase tracking-wider text-muted">
-          Multi-Agent Customer Support Crew
+          B-Mobile Support Crew
         </p>
         <h1 className="mt-1 font-display text-3xl font-semibold">
-          Critical Research Workflow
+          How can we help?
         </h1>
         <p className="mt-2 text-sm text-muted">
-          Single route: submit inputs, watch a run, inspect results and session history.
+          Ask about plans, billing, SIM, roaming, or a device order. Answers come
+          from B-Mobile help articles, or we hand you to a specialist.
         </p>
       </header>
 
@@ -41,39 +46,33 @@ export default function HomePage() {
         onAcknowledge={() => setDisclosureAcknowledged(true)}
       />
 
-      <InputsForm
+      <ChatWindow
+        history={workflow.history}
+        lastQuery={workflow.lastQuery}
+        phase={workflow.phase}
+        stageLabel={workflow.stageLabel}
         query={query}
         requestHuman={requestHuman}
-        phase={workflow.phase}
         crewStatus={workflow.crewStatus}
         error={workflow.error}
         onQueryChange={setQuery}
         onRequestHumanChange={setRequestHuman}
-        onSubmit={() =>
-          workflow.submit({
-            query,
-            requestHuman,
-            disclosureAcknowledged,
-          })
-        }
+        onSubmit={handleSubmit}
+        onNewConversation={() => {
+          workflow.startNewConversation();
+          setQuery("");
+          setRequestHuman(false);
+        }}
       />
 
       <RunStatus
-        phase={workflow.phase}
         crewStatus={workflow.crewStatus}
         stageLabel={workflow.stageLabel}
         lastUpdated={workflow.lastUpdated}
         runId={workflow.activeRunId}
-        onReset={workflow.reset}
       />
 
-      <ResultsPanel result={workflow.result} query={workflow.lastQuery} />
-
-      <HistoryList
-        entries={workflow.history}
-        activeRunId={workflow.activeRunId}
-        onSelect={workflow.showHistory}
-      />
+      <SpecialistStrip result={workflow.result} />
 
       <FutureWorkStubs />
     </main>

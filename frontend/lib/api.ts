@@ -1,5 +1,5 @@
 /**
- * API boundary for the Critical Research Workflow.
+ * API boundary for the B-Mobile support run (Critical Research Workflow).
  *
  * FE epic: re-export stubs. Integration epic: swap implementations to
  * fetch(`${NEXT_PUBLIC_API_BASE_URL}/api/chat`) — do not do that here.
