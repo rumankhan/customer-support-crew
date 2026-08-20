@@ -1,15 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { startRun, getRunStatus } from "./api";
+import { postChat } from "./api";
 import { deriveCrewStatus } from "./crewStatus";
 import { STAGE_LABELS, transitionRunPhase, type StageLabel } from "./fsm";
 import { UI } from "./uiCopy";
-import type { ChatResponse, HistoryEntry, RunInput, RunPhase } from "./types";
+import type { ChatRequest, ChatResponse, HistoryEntry, RunInput, RunPhase } from "./types";
 
-const POLL_MS = 400;
 const STAGE_TICK_MS = 900;
 const CLIENT_ABORT_MS = 55_000;
+
+/** Map authoritative `steps[]` length to a terminal StatusLine label (ADR-15). */
+function stageLabelFromSteps(steps: ChatResponse["steps"]): StageLabel {
+  if (steps.length <= 0) return STAGE_LABELS[0];
+  const index = Math.min(steps.length - 1, STAGE_LABELS.length - 1);
+  return STAGE_LABELS[index];
+}
 
 export function useResearchWorkflow() {
   const [phase, setPhase] = useState<RunPhase>("idle");
@@ -22,34 +28,60 @@ export function useResearchWorkflow() {
   const [lastUpdated, setLastUpdated] = useState(() => new Date());
   const [crewFault, setCrewFault] = useState(false);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stageRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const abortRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const abortTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryRef = useRef("");
-  const settledRef = useRef(false);
+  const runGenerationRef = useRef(0);
   const busyRef = useRef(false);
 
   const touchUpdated = useCallback(() => {
     setLastUpdated(new Date());
   }, []);
 
-  const clearTimers = useCallback(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
+  const stopStageTimer = useCallback(() => {
     if (stageRef.current) clearInterval(stageRef.current);
-    if (abortRef.current) clearTimeout(abortRef.current);
-    pollRef.current = null;
     stageRef.current = null;
-    abortRef.current = null;
   }, []);
 
-  useEffect(() => () => clearTimers(), [clearTimers]);
+  const clearAbort = useCallback(() => {
+    if (abortTimerRef.current) clearTimeout(abortTimerRef.current);
+    abortTimerRef.current = null;
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  }, []);
+
+  useEffect(
+    () => () => {
+      stopStageTimer();
+      clearAbort();
+    },
+    [clearAbort, stopStageTimer],
+  );
+
+  const startStageAnimation = useCallback(() => {
+    stopStageTimer();
+    setStageLabel(STAGE_LABELS[0]);
+    let stageIndex = 0;
+    stageRef.current = setInterval(() => {
+      stageIndex = Math.min(stageIndex + 1, STAGE_LABELS.length - 1);
+      setStageLabel(STAGE_LABELS[stageIndex]);
+      touchUpdated();
+    }, STAGE_TICK_MS);
+  }, [stopStageTimer, touchUpdated]);
 
   const completeWith = useCallback(
-    (next: ChatResponse, runId: string) => {
-      if (settledRef.current) return;
-      settledRef.current = true;
+    (next: ChatResponse, runId: string, generation: number) => {
+      if (generation !== runGenerationRef.current) return;
       busyRef.current = false;
-      clearTimers();
+      // ADR-15: stop optimistic local timer; snap StatusLine to authoritative steps[].
+      stopStageTimer();
+      abortRef.current = null;
+      if (abortTimerRef.current) clearTimeout(abortTimerRef.current);
+      abortTimerRef.current = null;
+      setStageLabel(stageLabelFromSteps(next.steps));
       setResult(next);
       setPhase((p) => transitionRunPhase(p, { type: "COMPLETE" }));
       touchUpdated();
@@ -64,39 +96,7 @@ export function useResearchWorkflow() {
         ...prev,
       ]);
     },
-    [clearTimers, touchUpdated],
-  );
-
-  const beginPolling = useCallback(
-    (runId: string) => {
-      setStageLabel(STAGE_LABELS[0]);
-      let stageIndex = 0;
-      stageRef.current = setInterval(() => {
-        stageIndex = Math.min(stageIndex + 1, STAGE_LABELS.length - 1);
-        setStageLabel(STAGE_LABELS[stageIndex]);
-        touchUpdated();
-      }, STAGE_TICK_MS);
-
-      const check = () => {
-        void getRunStatus(runId).then((status) => {
-          if (status.status === "done" && status.result) {
-            completeWith(status.result, runId);
-          }
-        });
-      };
-
-      check();
-      pollRef.current = setInterval(check, POLL_MS);
-
-      abortRef.current = setTimeout(() => {
-        void getRunStatus(runId).then((status) => {
-          if (status.result) {
-            completeWith(status.result, runId);
-          }
-        });
-      }, CLIENT_ABORT_MS);
-    },
-    [completeWith, touchUpdated],
+    [stopStageTimer, touchUpdated],
   );
 
   const submit = useCallback(
@@ -115,31 +115,46 @@ export function useResearchWorkflow() {
       busyRef.current = true;
       setError(null);
       setCrewFault(false);
-      settledRef.current = false;
+      const generation = ++runGenerationRef.current;
       queryRef.current = query;
       setLastQuery(query);
       setPhase((p) => transitionRunPhase(p, { type: "START" }));
       touchUpdated();
+      startStageAnimation();
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      abortTimerRef.current = setTimeout(() => controller.abort(), CLIENT_ABORT_MS);
+      const runId = `run-${Date.now().toString(36)}`;
+      setActiveRunId(runId);
+
+      const request: ChatRequest = {
+        message: query,
+        request_human: input.requestHuman,
+        disclosure_acknowledged: input.disclosureAcknowledged,
+      };
 
       try {
-        const { runId } = await startRun({ ...input, query });
-        setActiveRunId(runId);
-        beginPolling(runId);
+        const response = await postChat(request, controller.signal);
+        completeWith(response, runId, generation);
       } catch (err) {
+        if (generation !== runGenerationRef.current) return;
         busyRef.current = false;
+        stopStageTimer();
         setCrewFault(true);
-        setError(err instanceof Error ? err.message : "Could not start the run.");
-        setPhase("idle");
+        setError(err instanceof Error ? err.message : "Could not complete the request.");
+        setPhase((p) => transitionRunPhase(p, { type: "COMPLETE" }));
         touchUpdated();
       }
     },
-    [beginPolling, touchUpdated],
+    [completeWith, startStageAnimation, stopStageTimer, touchUpdated],
   );
 
   const startNewConversation = useCallback(() => {
-    clearTimers();
+    runGenerationRef.current += 1;
+    stopStageTimer();
+    clearAbort();
     busyRef.current = false;
-    settledRef.current = false;
     queryRef.current = "";
     setActiveRunId(null);
     setResult(null);
@@ -150,14 +165,7 @@ export function useResearchWorkflow() {
     setError(null);
     setCrewFault(false);
     touchUpdated();
-  }, [clearTimers, touchUpdated]);
-
-  const showHistory = useCallback((entry: HistoryEntry) => {
-    setResult(entry.result);
-    setLastQuery(entry.query);
-    setActiveRunId(entry.runId);
-    touchUpdated();
-  }, [touchUpdated]);
+  }, [clearAbort, stopStageTimer, touchUpdated]);
 
   return {
     phase,
@@ -171,6 +179,5 @@ export function useResearchWorkflow() {
     crewStatus: deriveCrewStatus(phase, result, crewFault),
     submit,
     startNewConversation,
-    showHistory,
   };
 }

@@ -61,15 +61,6 @@ export type RunInput = {
   disclosureAcknowledged: boolean;
 };
 
-export type StartRunResponse = {
-  runId: string;
-};
-
-export type RunStatusResponse = {
-  status: "running" | "done";
-  result?: ChatResponse;
-};
-
 export type HistoryEntry = {
   runId: string;
   query: string;

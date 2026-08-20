@@ -20,10 +20,9 @@ export const UI = {
   sourcesHeading: "From our help articles",
   escalateNotice:
     "We're connecting you with a B-Mobile specialist. Live chat isn't available in this demo yet.",
+  escalateCta: "I'd rather talk to a person",
+  escalateCtaHint: "Check the box below and send again so we route you to a specialist.",
   specialistNotes: "Notes for the specialist",
-  historyHeading: "Recent questions",
-  historyHelp: "Only saved in this browser tab. Refreshing the page clears the list.",
-  historyEmpty: "No questions in this visit yet.",
   comingLater: "Coming later",
 } as const;
 

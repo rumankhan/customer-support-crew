@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { UI, outcomeLabel } from "@/lib/uiCopy";
 import type { ChatResponse } from "@/lib/types";
 
@@ -10,6 +10,16 @@ type Props = {
 
 export function SpecialistStrip({ result }: Props) {
   const [stepsOpen, setStepsOpen] = useState(false);
+
+  // When a new ChatResponse lands, show authoritative steps[] (ADR-15).
+  useEffect(() => {
+    if (result?.steps?.length) {
+      setStepsOpen(true);
+    } else {
+      setStepsOpen(false);
+    }
+  }, [result?.trace_id, result?.steps?.length]);
+
   if (!result) return null;
 
   return (

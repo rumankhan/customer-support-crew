@@ -58,6 +58,7 @@ export default function HomePage() {
         onQueryChange={setQuery}
         onRequestHumanChange={setRequestHuman}
         onSubmit={handleSubmit}
+        onEscalateCta={() => setRequestHuman(true)}
         onNewConversation={() => {
           workflow.startNewConversation();
           setQuery("");
