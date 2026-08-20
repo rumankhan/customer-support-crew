@@ -394,7 +394,7 @@ Update this table **after every commit** that touches `frontend/` or this file. 
 | 2026-08-14 | *(uncommitted — initial FE slice)* | Inputs, Run, Results, History | All drafted | Initial Critical Research Workflow |
 | 2026-08-15 | *(uncommitted — chat window)* | Inputs, Run, Results, History | Re-checked | Chat bubbles; Start new conversation clears thread |
 | 2026-08-15 | *(uncommitted — fold spec)* | Whole file | Re-checked | Merged former `frontend-funcional-spec.md` into this artifact |
-| 2026-08-20 | *(filled after commit)* | Run, Results, Envelope, Spec Sync, Cleanup | All above | Single `postChat`; drop poller; ADR-15 snap; envelope paste; cleanup; `npm run build` PASS |
+| 2026-08-20 | `78392a84ebad53bdf0b02901f16015dbfb3f67a0` | Run, Results, Envelope, Spec Sync, Cleanup | All above | Single `postChat`; drop poller; ADR-15 snap; envelope paste; cleanup; `npm run build` PASS |
 
 ---
 
