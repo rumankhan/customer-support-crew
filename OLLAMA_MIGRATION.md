@@ -2,7 +2,7 @@
 
 ## Changes Made
 
-Based on the reference implementation from `D:\AgenticAI\mini-project\recruitment-assistant\`, the Ollama configuration has been updated to follow proven patterns.
+The Ollama configuration has been updated to use a centralized LLM configuration pattern with proper authentication and LiteLLM OpenAI-compatible routing.
 
 ### Key Updates
 
@@ -108,16 +108,29 @@ If you were using the old configuration:
 
 Follow the Quick Setup in `OLLAMA_SETUP.md`.
 
-## Reference Implementation
+## Implementation Pattern
 
-This implementation follows the pattern from:
-`D:\AgenticAI\mini-project\recruitment-assistant\backend\app\llm_config.py`
+This implementation uses a centralized LLM configuration approach:
 
-Key takeaways:
-1. Centralized LLM configuration module
-2. Provider-specific initialization logic
-3. Proper error handling for missing credentials
-4. LiteLLM OpenAI-compatible route for Ollama
+1. **Centralized Configuration Module** (`backend/llm_config.py`):
+   - Single source of truth for LLM setup
+   - Provider detection (OpenAI or Ollama)
+   - Settings validation and defaults
+
+2. **Shared LLM Instance**:
+   - All agents use the same `build_crew_llm()` instance
+   - Reduces memory overhead
+   - Consistent behavior across agents
+
+3. **Proper Error Handling**:
+   - Validates API keys before crew initialization
+   - Clear error messages for missing credentials
+   - Graceful fallback to defaults
+
+4. **LiteLLM OpenAI-Compatible Route**:
+   - Uses `openai/` prefix for Ollama models
+   - Passes `api_key` and `base_url` parameters
+   - Compatible with Ollama Cloud's OpenAI-compatible API
 
 ## Testing
 
@@ -179,4 +192,3 @@ To verify the changes work:
 - **Ollama Cloud:** https://ollama.com
 - **API Keys:** https://ollama.com/settings/keys
 - **Model Library:** https://ollama.com/library
-- **Reference Implementation:** `D:\AgenticAI\mini-project\recruitment-assistant\backend\app\llm_config.py`

@@ -43,10 +43,7 @@ async def lifespan(app: FastAPI):
     crew_instance = CustomerSupportCrew()
     print(f"Crew initialized:")
     print(f"  Provider: {crew_instance.llm_provider}")
-    print(f"  Model (low): {crew_instance.model_low}")
-    print(f"  Model (mid): {crew_instance.model_mid}")
-    if crew_instance.llm_provider == "ollama":
-        print(f"  Ollama Base URL: {crew_instance.ollama_base_url}")
+    print(f"  Model: {crew_instance.model_low}")
     
     yield
     
@@ -84,7 +81,7 @@ async def health_check():
 async def chat(request: ChatRequest):
     """
     Main chat endpoint - runs crew and returns resolution decision.
-    Implements SAD §2 contracts with 45s soft timeout.
+    Implements SAD §2 contracts with 90s soft timeout (increased for Ollama).
     """
     global crew_instance, last_result
     
@@ -99,8 +96,8 @@ async def chat(request: ChatRequest):
     trace_id = str(uuid.uuid4())
     start_time = datetime.now()
     
-    # Soft timeout at 45s per SAD
-    timeout_seconds = 45
+    # Soft timeout increased to 90s for Ollama gemma4:31b (slower than OpenAI)
+    timeout_seconds = 90
     
     try:
         # Run crew with timeout
@@ -374,8 +371,8 @@ def _write_prompt_trace(
         "meta": response.meta.dict(),
         "error": response.error.dict() if response.error else None,
         "model_tiers": {
-            "low": os.getenv("OPENAI_MODEL_LOW", "gpt-4o-mini"),
-            "mid": os.getenv("OPENAI_MODEL_MID", "gpt-4o-mini")
+            "low": crew_instance.model_low if crew_instance else "unknown",
+            "mid": crew_instance.model_mid if crew_instance else "unknown"
         },
         "elapsed_ms": int((datetime.now() - start_time).total_seconds() * 1000)
     }

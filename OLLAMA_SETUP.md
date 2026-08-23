@@ -224,16 +224,14 @@ To migrate from OpenAI to Ollama Cloud:
 
 4. **Test thoroughly:** Verify all agent responses meet quality standards
 
-## Reference Implementation
+## Technical Implementation Details
 
-This configuration is based on the proven pattern from:
-`D:\AgenticAI\mini-project\recruitment-assistant\backend\app\llm_config.py`
-
-Key implementation details:
-- Uses LiteLLM's OpenAI-compatible route (`openai/` prefix)
-- Requires API key authentication
-- Default base URL: `https://ollama.com/v1`
-- Centralized LLM configuration for consistency
+This configuration uses a centralized LLM configuration pattern with:
+- **LiteLLM OpenAI-compatible route** - Uses `openai/` prefix for Ollama models
+- **API key authentication** - Required for Ollama Cloud security
+- **Default base URL** - `https://ollama.com/v1` for Ollama Cloud
+- **Centralized configuration** - Single source of truth in `backend/llm_config.py`
+- **Shared LLM instance** - All agents use the same configured LLM
 
 ## Additional Resources
 

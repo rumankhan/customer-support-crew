@@ -5,7 +5,6 @@ Implements CrewAI sequential pipeline per SAD §2.
 import os
 from typing import Dict, Any
 from crewai import Agent, Task, Crew, Process
-from crewai import LLM
 from backend.models import (
     ClassifierOutput,
     RetrieverOutput, 
@@ -13,6 +12,7 @@ from backend.models import (
     EscalationOutput
 )
 from backend.tools import kb_search_tool, ticket_stub_tool
+from backend.llm_config import build_crew_llm, resolve_llm_settings
 
 
 class CustomerSupportCrew:
@@ -23,24 +23,18 @@ class CustomerSupportCrew:
     
     def __init__(self):
         """Initialize crew with model tier configuration."""
-        # Load LLM provider configuration
-        self.llm_provider = os.getenv("LLM_PROVIDER", "openai").lower()
-        self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
+        # Resolve LLM settings and create shared LLM instance
+        settings = resolve_llm_settings()
+        if settings is None:
+            raise RuntimeError(
+                "No LLM configured. Set OPENAI_API_KEY "
+                "or OLLAMA_API_KEY (+ optional LLM_PROVIDER=ollama)."
+            )
         
-        # Load model tier configuration per SAD ADR-19
-        if self.llm_provider == "ollama":
-            # For Ollama, use same model for all tiers (or specify different ones)
-            self.model_low = os.getenv("OLLAMA_MODEL", "gemma4:31b")
-            self.model_mid = os.getenv("OLLAMA_MODEL", "gemma4:31b")
-        else:
-            # OpenAI models
-            self.model_low = os.getenv("OPENAI_MODEL_LOW", "gpt-4o-mini")
-            self.model_mid = os.getenv("OPENAI_MODEL_MID", "gpt-4o-mini")
-            self.model_fallback = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-            
-            # Resolve tier to model (fallback if tier env not set)
-            self.model_low = self.model_low if self.model_low else self.model_fallback
-            self.model_mid = self.model_mid if self.model_mid else self.model_fallback
+        self.llm_provider = settings.provider
+        self.model_low = settings.model  # Same model for all agents (shared LLM pattern)
+        self.model_mid = settings.model
+        self.shared_llm = build_crew_llm()
         
         # Load control parameters
         self.max_iter = int(os.getenv("MAX_ITER", "12"))
@@ -51,46 +45,8 @@ class CustomerSupportCrew:
         self.agents = self._create_agents()
         
     def _create_agents(self) -> Dict[str, Agent]:
-        """Create the 4 specialized agents with model tiers."""
-        # Configure LLM based on provider
-        if self.llm_provider == "ollama":
-            # Ollama Cloud via LiteLLM's OpenAI-compatible route
-            # Requires OLLAMA_API_KEY for authentication
-            ollama_api_key = os.getenv("OLLAMA_API_KEY")
-            if not ollama_api_key:
-                raise RuntimeError("OLLAMA_API_KEY required when LLM_PROVIDER=ollama")
-            
-            # Use openai/ prefix for LiteLLM OpenAI-compatible route
-            model_low_litellm = f"openai/{self.model_low}" if "/" not in self.model_low else self.model_low
-            model_mid_litellm = f"openai/{self.model_mid}" if "/" not in self.model_mid else self.model_mid
-            
-            # Low-tier LLM for classifier, retriever, escalation
-            llm_low = LLM(
-                model=model_low_litellm,
-                api_key=ollama_api_key,
-                base_url=self.ollama_base_url,
-                temperature=0.2
-            )
-            
-            # Mid-tier LLM for response specialist
-            llm_mid = LLM(
-                model=model_mid_litellm,
-                api_key=ollama_api_key,
-                base_url=self.ollama_base_url,
-                temperature=0.4
-            )
-        else:
-            # OpenAI models (default)
-            llm_low = LLM(
-                model=self.model_low,
-                temperature=0.2
-            )
-            
-            llm_mid = LLM(
-                model=self.model_mid,
-                temperature=0.4
-            )
-        
+        """Create the 4 specialized agents with shared LLM."""
+        # Use shared LLM for all agents (recruitment assistant pattern)
         agents = {
             "query_classifier": Agent(
                 role="Inquiry Classification Specialist",
@@ -101,7 +57,7 @@ class CustomerSupportCrew:
                     "(like account, plan, device), assess urgency, and provide a confidence score. "
                     "You work with precision and always structure your output clearly."
                 ),
-                llm=llm_low,
+                llm=self.shared_llm,
                 allow_delegation=False,
                 verbose=True,
                 max_iter=self.max_iter
@@ -116,7 +72,7 @@ class CustomerSupportCrew:
                     "you cannot find information on a topic. You never fabricate information and "
                     "always work from documented knowledge."
                 ),
-                llm=llm_low,
+                llm=self.shared_llm,
                 tools=[kb_search_tool],
                 allow_delegation=False,
                 verbose=True,
@@ -133,7 +89,7 @@ class CustomerSupportCrew:
                     "that and recommend escalation to a human agent. You write in a friendly, "
                     "professional tone."
                 ),
-                llm=llm_mid,
+                llm=self.shared_llm,
                 allow_delegation=False,
                 verbose=True,
                 max_iter=self.max_iter
@@ -149,7 +105,7 @@ class CustomerSupportCrew:
                     "that help human agents handle the case effectively. You use text-only sentiment "
                     "analysis and deterministic rules to ensure consistent decisions."
                 ),
-                llm=llm_low,
+                llm=self.shared_llm,
                 tools=[ticket_stub_tool],
                 allow_delegation=False,
                 verbose=True,

@@ -47,5 +47,5 @@ llama3.1:70b  - Highest quality, slower
 
 REFERENCE
 =========
-Based on: D:\AgenticAI\mini-project\recruitment-assistant\backend\app\llm_config.py
+Implementation: backend/llm_config.py (centralized LLM configuration)
 Docs: https://ollama.com/docs

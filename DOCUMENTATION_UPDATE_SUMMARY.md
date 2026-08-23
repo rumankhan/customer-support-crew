@@ -263,7 +263,7 @@ OLLAMA_MODEL=gemma4:31b
 
 ## References
 
-- **Reference Implementation:** `D:\AgenticAI\mini-project\recruitment-assistant\backend\app\llm_config.py`
+- **Implementation Module:** `backend/llm_config.py` (centralized LLM configuration)
 - **LiteLLM Documentation:** https://docs.litellm.ai/
 - **Ollama Cloud:** https://ollama.com
 - **Ollama API Docs:** https://ollama.com/docs
