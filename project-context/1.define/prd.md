@@ -147,7 +147,7 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 | Ticketing (Zendesk/etc.) | **Stub only** — no live third-party | Live connector (P1) |
 | CRM write actions | Out | P1+ |
 | Auth | Demo-safe: open chat; optional `OPERATOR_API_KEY` only if last-result polish is enabled | SSO/IAM |
-| LLM provider | Via env (`OPENAI_API_KEY` or provider used by CrewAI) | Multi-provider router |
+| LLM provider | Via env (`LLM_PROVIDER`: `openai` with `OPENAI_API_KEY`, or `ollama` with `OLLAMA_API_KEY`) | Multi-provider router |
 | Database | **None** (backend persona forbids persistence) | Optional store later |
 
 **Performance targets (MVP)**: p95 automated response path < 30s end-to-end excluding human; support ≥ 5 concurrent demo sessions (course demo scale; 10 aspirational).
@@ -386,9 +386,13 @@ Sufficient detail for each of the six Build-stage epics. Personas must not inven
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` (or provider key CrewAI uses) | LLM access |
-| `OPENAI_MODEL_LOW` | Low tier (default `gpt-4.1-nano`) — classify, retrieve, escalate |
-| `OPENAI_MODEL_MID` | Mid tier (default `gpt-4.1-mini`) — response specialist |
+| `LLM_PROVIDER` | LLM provider selection: `openai` (default) or `ollama` |
+| `OPENAI_API_KEY` | OpenAI API access (when `LLM_PROVIDER=openai`) |
+| `OPENAI_MODEL_LOW` | Low tier (default `gpt-4o-mini`) — classify, retrieve, escalate |
+| `OPENAI_MODEL_MID` | Mid tier (default `gpt-4o-mini`) — response specialist |
+| `OLLAMA_API_KEY` | Ollama Cloud API key (when `LLM_PROVIDER=ollama`) |
+| `OLLAMA_BASE_URL` | Ollama Cloud endpoint (default `https://ollama.com/v1`) |
+| `OLLAMA_MODEL` | Ollama model (default `gemma4:31b`) — all tiers |
 | `OPENAI_MODEL` | Fallback if a tier env unset (default `gpt-4o-mini`) |
 | `AAMAD_TARGET_RUNTIME` | `crewai` |
 | `BACKEND_PORT` | API listen port (e.g. 8000) |
@@ -547,7 +551,7 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 
 ## Open Questions
 
-1. ~~Exact LLM model string~~ — **Resolved (SAD ADR-19):** tier map — `OPENAI_MODEL_LOW` default `gpt-4.1-nano` (3 agents), `OPENAI_MODEL_MID` default `gpt-4.1-mini` (`response_specialist`); `OPENAI_MODEL` fallback `gpt-4o-mini`. Backend records resolved map in Audit.  
+1. ~~Exact LLM model string~~ — **Resolved (SAD ADR-19):** tier map supports OpenAI (`OPENAI_MODEL_LOW` / `OPENAI_MODEL_MID` default `gpt-4o-mini`) or Ollama Cloud (`OLLAMA_MODEL` default `gemma4:31b`); provider selected via `LLM_PROVIDER` env var. Backend records resolved map in Audit.  
 2. Disclosure legal copy owner (working default: “You are chatting with the B-Mobile AI assistant”) until instructor copy is provided.  
 3. Confirm Week-1 `sad.md` / `setup.md` already exist on disk or must be produced ASAP in Week 2.  
 4. Preferred monorepo layout names if instructor template differs (`apps/web` vs `frontend`).  

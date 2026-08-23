@@ -1,0 +1,51 @@
+OLLAMA CLOUD QUICK START
+========================
+
+1. GET API KEY
+   Visit: https://ollama.com/settings/keys
+   Create new key and copy it
+
+2. UPDATE .env FILE
+   Edit: .env
+   
+   Set these values:
+   LLM_PROVIDER=ollama
+   OLLAMA_API_KEY=your-ollama-api-key-here
+   OLLAMA_BASE_URL=https://ollama.com/v1
+   OLLAMA_MODEL=gemma4:31b
+
+3. START BACKEND
+   Run: python -m backend.main
+   
+   Should see:
+   "Provider: ollama"
+   "Model (low): gemma4:31b"
+   "Ollama Base URL: https://ollama.com/v1"
+
+4. TEST
+   POST http://localhost:8000/api/chat
+   Body: {"message": "Hello, I need help"}
+
+TROUBLESHOOTING
+===============
+
+Problem: "OLLAMA_API_KEY required"
+Solution: Add OLLAMA_API_KEY to .env file
+
+Problem: "Cannot connect to Ollama"
+Solution: Check internet connection and API key validity
+
+Problem: "Model not found"
+Solution: Verify model name or try llama3.1:8b
+
+MODELS
+======
+
+gemma4:31b    - Default, best balance (Recommended)
+llama3.1:8b   - Faster, good for development
+llama3.1:70b  - Highest quality, slower
+
+REFERENCE
+=========
+Based on: D:\AgenticAI\mini-project\recruitment-assistant\backend\app\llm_config.py
+Docs: https://ollama.com/docs

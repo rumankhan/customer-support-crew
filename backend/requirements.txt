@@ -1,0 +1,23 @@
+# Multi-Agent Customer Support Crew - Backend Dependencies
+# Python 3.10+
+
+# CrewAI Framework (pin compatible versions)
+crewai>=0.80.0,<1.0.0
+
+# FastAPI and Server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# ML/NLP for KB Search (TF-IDF)
+scikit-learn>=1.3.0
+numpy>=1.24.0
+
+# Data Validation
+pydantic>=2.5.0
+
+# LLM Provider
+openai>=1.0.0
+
+# Utilities
+python-dotenv>=1.0.0
