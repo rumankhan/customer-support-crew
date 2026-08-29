@@ -78,6 +78,74 @@ def main() -> int:
         print("FAIL: info-only should not HITL")
         return 1
 
+    from backend.approval_service import approved_reply
+
+    credit_copy = approved_reply(
+        "billing_credit",
+        "REF-59",
+        59.0,
+        None,
+        59,
+        "credit for outage",
+    )
+    print("Approved credit copy:", credit_copy)
+    if "Request #" in credit_copy or "early termination" in credit_copy.lower():
+        print("FAIL: credit approval must not mention request # or ETF")
+        return 1
+    if "crediting you $59 for the outage" not in credit_copy:
+        print("FAIL: expected 'crediting you $59 for the outage'")
+        return 1
+
+    mislabeled = approved_reply(
+        "etf_waiver",
+        "REF-59",
+        59.0,
+        None,
+        59,
+        "credit for outage",
+    )
+    print("Credit phrasing on ETF kind:", mislabeled)
+    if "crediting you $59 for the outage" not in mislabeled:
+        print("FAIL: customer credit wording should win when they asked for a credit")
+        return 1
+
+    from backend.approval_service import denied_reply
+
+    deny_copy = denied_reply(
+        "billing_credit",
+        "REF-59",
+        59.0,
+        "outage already credited last month",
+        59,
+        "credit for outage",
+    )
+    print("Denied credit copy:", deny_copy)
+    if "Request #" in deny_copy or "early termination" in deny_copy.lower():
+        print("FAIL: credit denial must not mention request # or ETF")
+        return 1
+    if "unable to credit you $59 for the outage" not in deny_copy:
+        print("FAIL: expected unable to credit you $59 for the outage")
+        return 1
+    if "outage already credited last month" not in deny_copy:
+        print("FAIL: expected manager reason in denial")
+        return 1
+
+    deny_mislabeled = denied_reply(
+        "etf_waiver",
+        "REF-59",
+        59.0,
+        None,
+        59,
+        "credit for outage",
+    )
+    print("Denied credit on ETF kind:", deny_mislabeled)
+    if "unable to credit you $59 for the outage" not in deny_mislabeled:
+        print("FAIL: credit denial wording should win when they asked for a credit")
+        return 1
+    if "early termination" in deny_mislabeled.lower():
+        print("FAIL: ETF boilerplate must not appear on a credit denial")
+        return 1
+
     print("OK")
     return 0
 

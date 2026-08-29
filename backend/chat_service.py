@@ -386,6 +386,7 @@ def map_to_response(result: dict, trace_id: str, request: ChatRequest) -> ChatRe
                 approval.subject_id,
                 approval.amount,
                 (approval.context or {}).get("lookup_number"),
+                approval.reason,
             )
             decision = "pending_approval"
             reply = pending_msg

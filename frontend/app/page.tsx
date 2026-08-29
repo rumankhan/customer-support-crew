@@ -5,7 +5,6 @@ import { ChatWindow } from "@/components/ChatWindow";
 import { DisclosureBanner } from "@/components/DisclosureBanner";
 import { FutureWorkStubs } from "@/components/FutureWorkStubs";
 import { RunStatus } from "@/components/RunStatus";
-import { SpecialistStrip } from "@/components/SpecialistStrip";
 import { useResearchWorkflow } from "@/lib/useResearchWorkflow";
 
 export default function HomePage() {
@@ -78,8 +77,6 @@ export default function HomePage() {
         lastUpdated={workflow.lastUpdated}
         runId={workflow.activeRunId}
       />
-
-      <SpecialistStrip result={workflow.result} />
 
       <FutureWorkStubs />
     </main>

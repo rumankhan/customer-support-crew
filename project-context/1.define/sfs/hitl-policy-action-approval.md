@@ -121,8 +121,8 @@ created_at, decided_at
 
 | Action | Pending | Approved | Denied (manager reason) | Denied (`/skip`) |
 |--------|---------|----------|-------------------------|------------------|
-| Billing credit | Looking that up… Request #N | Credit applied (stub) | `Request #N was not approved. Reason: {note}` | Contract/billing boilerplate |
-| ETF waiver | Looking that up… Request #N | Waiver applied (stub) | `Request #N was not approved. Reason: {note}` | Early-termination contract boilerplate |
+| Billing credit | Looking that up… manager reviewing $X for {reason} | `Your request was approved and we are crediting you $X for {reason}.` | `Your request was not approved. We are unable to credit you $X for {reason}.` + manager note | Billing boilerplate |
+| ETF waiver | Looking that up… manager reviewing waive $X | Waiver approved (or credit copy if they asked for a credit) | `Your request was not approved. Reason: {note}` | Early-termination boilerplate |
 
 ---
 

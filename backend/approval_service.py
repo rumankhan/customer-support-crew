@@ -381,6 +381,42 @@ def load_subject_context(subject_id: str) -> Dict[str, Any]:
 # Customer-facing copy helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _format_dollars(amount: Optional[float], fallback: Optional[int] = None) -> Optional[str]:
+    value = amount if amount is not None else (float(fallback) if fallback is not None else None)
+    if value is None:
+        return None
+    if abs(value - round(value)) < 1e-9:
+        return f"${round(value):.0f}"
+    return f"${value:.2f}"
+
+
+def _reason_clause(reason: Optional[str]) -> str:
+    """Short 'for …' clause from the customer's message, e.g. 'the outage last week'."""
+    raw = (reason or "").strip()
+    if not raw:
+        return ""
+    match = re.search(r"\bfor\s+(.+)$", raw, re.IGNORECASE)
+    clause = match.group(1) if match else ""
+    if not clause:
+        because = re.search(r"\bbecause(?:\s+of)?\s+(.+)$", raw, re.IGNORECASE)
+        clause = because.group(1) if because else ""
+    clause = re.sub(r"\b(?:ACC|ORD|REF)-\w+\b", "", clause, flags=re.IGNORECASE)
+    clause = re.sub(r"\$\s*\d+(?:\.\d+)?", "", clause)
+    clause = re.sub(r"\s+", " ", clause).strip(" \t.,!?;:")
+    if not clause:
+        return ""
+    if re.match(r"^(the|a|an|my|our|this|that|last)\b", clause, re.IGNORECASE):
+        return clause
+    return f"the {clause}"
+
+
+def _treat_as_credit(action_kind: str, reason: Optional[str]) -> bool:
+    if action_kind == "billing_credit":
+        return True
+    text = (reason or "").lower()
+    return "credit" in text and "credit card" not in text
+
+
 def _lookup_number(context: Optional[Dict[str, Any]], subject_id: str) -> Optional[int]:
     ctx = context or {}
     raw = ctx.get("lookup_number")
@@ -401,33 +437,29 @@ def pending_reply(
     subject_id: str,
     amount: Optional[float],
     lookup_number: Optional[int] = None,
+    reason: Optional[str] = None,
 ) -> str:
-    n = lookup_number
-    if n is not None:
-        amt = f"${amount:.0f}" if amount is not None else f"${n}"
-        if action_kind == "billing_credit":
+    amt = _format_dollars(amount, lookup_number)
+    clause = _reason_clause(reason)
+    if _treat_as_credit(action_kind, reason):
+        if amt and clause:
             return (
-                f"We're looking that up now. Request #{n} ({amt} credit) is with a manager for approval. "
-                "Please wait a moment…"
+                f"We're looking that up now. A manager is reviewing your request to credit you "
+                f"{amt} for {clause}. Please wait a moment…"
             )
-        if action_kind == "etf_waiver":
+        if amt:
             return (
-                f"We're looking that up now. Request #{n} (waive {amt} fee) is with a manager for approval. "
+                f"We're looking that up now. A manager is reviewing your {amt} credit request. "
                 "Please wait a moment…"
             )
         return (
-            f"We're looking that up now. Request #{n} is with a manager for approval. Please wait a moment…"
-        )
-    label = ACTION_KIND_LABELS.get(action_kind, action_kind)
-    if action_kind == "billing_credit":
-        amt = f"${amount:.2f}" if amount else "your credit"
-        return (
-            f"Your {amt} credit request for account {subject_id} is being reviewed by a manager. "
+            "We're looking that up now. A manager is reviewing your credit request. "
             "Please wait a moment…"
         )
     if action_kind == "etf_waiver":
+        fee = amt or "the fee"
         return (
-            f"Your ETF waiver request for account {subject_id} is being reviewed by a manager. "
+            f"We're looking that up now. A manager is reviewing your request to waive {fee}. "
             "Please wait a moment…"
         )
     if action_kind == "security_override":
@@ -440,9 +472,8 @@ def pending_reply(
             f"Your refund request for {subject_id} is being reviewed by a manager. "
             "Please wait a moment…"
         )
-    return (
-        f"Your {label} request is being reviewed by a manager. Please wait a moment…"
-    )
+    label = ACTION_KIND_LABELS.get(action_kind, action_kind)
+    return f"Your {label} request is being reviewed by a manager. Please wait a moment…"
 
 
 def approved_reply(
@@ -451,59 +482,85 @@ def approved_reply(
     amount: Optional[float],
     note: Optional[str],
     lookup_number: Optional[int] = None,
+    reason: Optional[str] = None,
 ) -> str:
-    n = lookup_number
-    if action_kind == "billing_credit":
-        amt = f"${amount:.2f}" if amount else "the requested credit"
-        if n is not None:
-            return f"Request #{n} approved. {amt} credit applied; it will appear on your next bill."
-        return f"{amt} credit applied to {subject_id}; it will appear on your next bill."
+    amt = _format_dollars(amount, lookup_number)
+    clause = _reason_clause(reason)
+    if _treat_as_credit(action_kind, reason):
+        if amt and clause:
+            return (
+                f"Your request was approved and we are crediting you {amt} for {clause}."
+            )
+        if amt:
+            return f"Your request was approved and we are crediting you {amt}."
+        if clause:
+            return f"Your request was approved and we are applying a credit for {clause}."
+        return "Your request was approved and we are applying the credit."
     if action_kind == "etf_waiver":
-        amt = f"${amount:.2f}" if amount else "the fee"
-        if n is not None:
-            return f"Request #{n} approved. {amt} early termination fee waived; your plan ends at the next cycle."
-        return (
-            f"Your early termination fee has been waived for account {subject_id}. "
-            "Your plan will end at the next cycle."
-        )
+        fee = amt or "the early termination fee"
+        if clause:
+            return (
+                f"Your request was approved. We have waived {fee} for {clause}."
+            )
+        return f"Your request was approved. We have waived {fee}."
     if action_kind == "security_override":
         return (
             f"Your PIN reset has been authorised for account {subject_id}. "
             "A secure reset link has been sent to the email address on file."
         )
     if action_kind == "refund":
-        amt = f"${amount:.2f}" if amount else "the requested amount"
-        return f"Refund of {amt} approved for {subject_id}. It will post in 5–10 business days."
-    if n is not None:
-        return f"Request #{n} approved."
-    return f"Your request for {subject_id} has been approved."
+        refund_amt = amt or "the requested amount"
+        return f"Your request was approved. A refund of {refund_amt} will post for {subject_id} in 5–10 business days."
+    return "Your request was approved."
 
 
 def denied_reply(
     action_kind: str,
     subject_id: str,
+    amount: Optional[float],
     note: Optional[str],
     lookup_number: Optional[int] = None,
+    reason: Optional[str] = None,
 ) -> str:
-    """If the manager supplied a reason, that is the customer-facing explanation."""
-    n = lookup_number
-    head = (
-        f"Request #{n} was not approved."
-        if n is not None
-        else f"Your request for {subject_id} was not approved."
-    )
-    if note and note.strip():
-        return f"{head} Reason: {note.strip()}"
+    """Mirror approved copy: amount + customer reason, no request number."""
+    amt = _format_dollars(amount, lookup_number)
+    clause = _reason_clause(reason)
+    manager = f" Reason: {note.strip()}" if note and note.strip() else ""
 
-    if action_kind == "billing_credit":
-        return f"{head} Please contact billing for further review."
+    if _treat_as_credit(action_kind, reason):
+        if amt and clause:
+            body = (
+                f"Your request was not approved. We are unable to credit you {amt} "
+                f"for {clause}."
+            )
+        elif amt:
+            body = f"Your request was not approved. We are unable to credit you {amt}."
+        elif clause:
+            body = (
+                f"Your request was not approved. We are unable to apply a credit for {clause}."
+            )
+        else:
+            body = "Your request was not approved. We are unable to apply the requested credit."
+        return body + manager
+
     if action_kind == "etf_waiver":
-        return f"{head} The early termination fee applies per your contract terms."
+        fee = amt or "the early termination fee"
+        body = f"Your request was not approved. We are unable to waive {fee}."
+        if manager:
+            return body + manager
+        return f"{body} The early termination fee applies per your contract terms."
     if action_kind == "security_override":
-        return f"{head} Please visit a B-Mobile store with a valid photo ID."
+        return (
+            "Your request was not approved. Please visit a B-Mobile store with a valid photo ID."
+            + manager
+        )
     if action_kind == "refund":
-        return f"{head} Please reply if you'd like to discuss further or speak with a specialist."
-    return head
+        return (
+            "Your request was not approved. Please reply if you'd like to discuss further "
+            "or speak with a specialist."
+            + manager
+        )
+    return "Your request was not approved." + manager
 
 
 def customer_reply_for(approval: ApprovalRequest) -> str:
@@ -516,17 +573,21 @@ def customer_reply_for(approval: ApprovalRequest) -> str:
             approval.amount,
             approval.operator_note,
             n,
+            approval.reason,
         )
     if approval.status == "denied":
         return denied_reply(
             approval.action_kind,
             approval.subject_id,
+            approval.amount,
             approval.operator_note,
             n,
+            approval.reason,
         )
     return pending_reply(
         approval.action_kind,
         approval.subject_id,
         approval.amount,
         n,
+        approval.reason,
     )

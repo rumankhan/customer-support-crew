@@ -131,7 +131,7 @@ python -m backend.scripts.telegram_get_chat_id
 | `credit for outage` | Same HITL path; **lookup #** 1–100 assigned (`REF-{n}`, proposed `$n`) |
 | `can you waive my fee` | Same HITL path with lookup # |
 
-After **Deny**, the bot asks for a reason. Type the reason, or `/skip` for contract boilerplate only. If a reason is sent, the customer sees `Request #N was not approved. Reason: {note}` — not extra ETF boilerplate.
+After **Deny**, the bot asks for a reason. Type the reason, or `/skip` for contract boilerplate only. Credit denials say `Your request was not approved. We are unable to credit you $X for {their reason}` (plus the manager note when provided) — no request number and no ETF boilerplate.
 
 Telegram commands: `/pending`, `/history`, `/detail APR-xxxxxxxx`
 
