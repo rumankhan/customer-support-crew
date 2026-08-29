@@ -48,13 +48,13 @@ Implemented in `backend/chat_service.py` — `detect_policy_action()`:
 
 | `action_kind` | Detection criteria |
 |---------------|-------------------|
-| `billing_credit` | Intent contains credit/goodwill/compensation + entity matches `ACC-\d+` + dollar amount |
-| `etf_waiver` | Intent contains cancel/termination/waive + fee/ETF keyword |
-| `security_override` | Intent contains reset PIN + lost SIM / no SMS |
-| `refund` | Intent contains refund/process return + entity matches `ORD-\d+` |
-| `roaming_exception` | Intent contains enable roaming + exception/free |
+| `billing_credit` | Credit/goodwill/compensation/outage language. Account (`ACC-*`) and dollar amount optional |
+| `etf_waiver` | Cancel/termination/waive + fee/ETF language. Account and amount optional |
+| `security_override` | Reset PIN + lost SIM / no SMS |
+| `refund` | Refund/process return + `ORD-*` |
+| `roaming_exception` | Enable roaming + exception/free |
 
-If no subject entity found → return clarifying question, no HITL.
+Vague credit/fee lines (`credit for outage`, `can you waive my fee`) still open HITL. If account **or** amount is missing, assign **lookup # 1–100** (`subject_id` `REF-{n}` when no account; proposed amount `$n` when no dollars). If both account and amount are present, no lookup #.
 
 ---
 
@@ -119,12 +119,10 @@ created_at, decided_at
 
 ## Customer-Facing Copy
 
-| Action | Pending | Approved | Denied |
-|--------|---------|----------|--------|
-| Billing credit | "Your credit request is being reviewed by a manager. Please wait…" | "$X credit applied to {account}; appears on next bill." | "Unable to approve credit. {note}. Contact billing for review." |
-| ETF waiver | "Your ETF waiver request is being reviewed by a manager. Please wait…" | "Early termination fee waived; plan ends {date}." | "ETF waiver denied per contract terms. {note}." |
-| Security override | "Your PIN override request is being reviewed. Please wait…" | "PIN reset authorized; secure link sent to email on file." | "Cannot override SMS verification remotely. Visit store with photo ID." |
-| Refund | "Your refund request is being reviewed by a manager. Please wait…" | "Refund of ${amount} approved for {order}." | "Refund denied. {note}." |
+| Action | Pending | Approved | Denied (manager reason) | Denied (`/skip`) |
+|--------|---------|----------|-------------------------|------------------|
+| Billing credit | Looking that up… Request #N | Credit applied (stub) | `Request #N was not approved. Reason: {note}` | Contract/billing boilerplate |
+| ETF waiver | Looking that up… Request #N | Waiver applied (stub) | `Request #N was not approved. Reason: {note}` | Early-termination contract boilerplate |
 
 ---
 
@@ -134,6 +132,7 @@ created_at, decided_at
 🔔 Approval required — {Action Kind Label}
 
 Account/Order: {subject_id}
+Lookup #: {n}   ← when assigned (vague credit/fee)
 Amount: ${amount}
 Reason: {reason}
 
@@ -155,6 +154,8 @@ Ref: {approval_id} | Trace: {trace_id}
 |---------|----------|
 | `/pending` | Lists all pending approvals with short summary |
 | `/history` | Last 10 approved/denied decisions |
+| `/detail APR-xxxxxxxx` | Full request |
+| After Deny | Bot asks for a reason, or `/skip` |
 
 ---
 
@@ -210,7 +211,7 @@ Ref: {approval_id} | Trace: {trace_id}
 ## Sources
 - PRD §6 Future Features: autonomous CRM mutations, refunds
 - MRD §3: HITL required for policy exceptions, regulated decisions
-- SAD ADR-HITL-01 (application-level gate)
+- SAD ADR-21 (Telegram HITL); ADR-HITL-01 application-level gate
 
 ## Assumptions
 - Single manager DM; group chat requires `chat_id` of group
@@ -226,3 +227,9 @@ Ref: {approval_id} | Trace: {trace_id}
 - Action: create-sfs (HITL policy action approval)
 - Timestamp: 2026-08-28
 - Runtime: crewai (application-level gate; no CrewAI human_input used)
+
+### Audit (append)
+- Persona: @backend.eng
+- Action: sync-docs
+- Timestamp: 2026-08-28T23:45:00-05:00
+- Notes: Vague credit/fee → lookup # 1–100; deny reason vs `/skip` copy

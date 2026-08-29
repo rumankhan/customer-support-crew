@@ -13,28 +13,31 @@
 
 This document details the backend implementation for the Multi-Agent Customer Support Crew MVP. The backend implements:
 
-- **4 specialized CrewAI agents** with structured Pydantic outputs
+- **4 specialized CrewAI agents** with structured Pydantic outputs (YAML in `backend/config/`)
 - **Sequential task pipeline** with context chaining
-- **TF-IDF/bag-of-words knowledge retrieval** over local CSV knowledge base
-- **FastAPI HTTP endpoints** for chat and health check
-- **45-second soft timeout** with error envelope escalation
+- **SQLite FTS5 knowledge retrieval** over `backend/data/support.db` (seeded from `backend/kb/articles.csv`; SAD ADR-20)
+- **Telegram HITL** for policy actions (billing credit, ETF waiver; SAD ADR-21)
+- **FastAPI** JSON `POST /api/chat` plus **SSE** `POST /api/chat/stream`
+- **Crew timeout** `CHAT_TIMEOUT_SECONDS` (default 180s) and HITL wait `HITL_TIMEOUT_SECONDS` (default 300s)
 - **Prompt trace logging** for auditability
 
-**Core Value**: Grounded chat resolution **or** clean human escalation with full context packet — without blind queue or black-box FAQ bot.
+**Core Value**: Grounded chat resolution, clean human escalation with a context packet, or manager-gated policy action — without a blind queue or black-box FAQ bot.
 
 ### Implementation Status
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Pydantic Models | ✅ Complete | `backend/models.py` — all 9 models per SAD §2 |
-| KB Search Tool | ✅ Complete | `backend/tools.py` — TF-IDF with 0.35 floor |
+| Pydantic Models | ✅ Complete | `backend/models.py` — crew outputs + `ChatResponse` (`pending_approval`, `approval`) |
+| KB Search Tool | ✅ Complete | `backend/tools.py` — SQLite FTS5, floor 0.35 |
+| Account / order lookup | ✅ Complete | Stub tables in `support.db` |
 | Ticket Stub Tool | ✅ Complete | `backend/tools.py` — in-memory stub |
-| Agents (4) | ✅ Complete | `backend/crew.py` — model tiers per ADR-19 |
-| Tasks (4) | ✅ Complete | `backend/crew.py` — sequential with context |
-| FastAPI Endpoints | ✅ Complete | `backend/main.py` — /api/chat, /health |
+| Agents (4) | ✅ Complete | `backend/crew.py` + `config/agents.yaml` |
+| Tasks (4) | ✅ Complete | `config/tasks.yaml` — sequential with context |
+| FastAPI Endpoints | ✅ Complete | `/api/chat`, `/api/chat/stream`, `/api/approvals/*`, `/health` |
+| HITL + Telegram | ✅ Complete | `approval_service.py`, `telegram_bot.py` |
 | Error Handling | ✅ Complete | Timeout, LLM failure, KB unavailable |
 | Prompt Trace | ✅ Complete | JSON logs to LOG_DIR |
-| Seed KB | ✅ Complete | 12 B-Mobile FAQs in `backend/kb/articles.csv` |
+| Seed KB | ✅ Complete | 12 B-Mobile FAQs in CSV → FTS5 on startup |
 
 ---
 
@@ -44,19 +47,20 @@ This document details the backend implementation for the Multi-Agent Customer Su
 
 ```
 backend/
-├── __init__.py           # Package marker
-├── main.py               # FastAPI app with endpoints
-├── crew.py               # CustomerSupportCrew orchestrator (loads from YAML)
-├── models.py             # Pydantic schemas (9 models)
-├── tools.py              # kb_search (TF-IDF) + ticket_stub
+├── main.py               # FastAPI app + lifespan (SQLite + optional Telegram poll)
+├── crew.py               # CustomerSupportCrew (YAML + tools)
+├── chat_service.py       # Mapper, guardrails, policy-action detect
+├── streaming.py          # SSE events including HITL wait
+├── approval_service.py   # SQLite approval queue + customer copy
+├── telegram_bot.py       # Manager Approve/Deny + deny reason
+├── db.py                 # Schema + seed (kb, stubs, approvals)
+├── models.py             # Pydantic schemas
+├── tools.py              # kb_search (FTS5), account/order lookup, ticket_stub
 ├── llm_config.py         # LLM provider resolution (OpenAI/Ollama)
-├── requirements.txt      # Python dependencies
-├── config/
-│   ├── agents.yaml       # 4 agent definitions (CrewAI adapter)
-│   └── tasks.yaml        # 4 task definitions with context
-└── kb/
-    ├── articles.csv      # 12 B-Mobile FAQ rows (id, title, body)
-    └── README.md         # KB documentation
+├── config/agents.yaml + tasks.yaml
+├── kb/articles.csv       # Canonical FAQ seed/export
+├── data/support.db       # Live DB (local; not committed)
+└── scripts/              # migrate_kb_csv_to_sqlite, telegram_get_chat_id, validate_kb_hitl
 ```
 
 ### Agent Pipeline (Sequential)
@@ -80,7 +84,7 @@ POST /api/chat {message, request_human, ...}
     ↓
 FastAPI validation (max 4000 chars)
     ↓
-crew.kickoff() [45s timeout]
+crew.kickoff() [CHAT_TIMEOUT_SECONDS, default 180s]
     ↓
 4 sequential tasks → Pydantic outputs
     ↓
@@ -122,22 +126,22 @@ Nine structured models aligned with SAD §2 contracts:
 
 #### KBSearchTool
 
-**Purpose**: Search `backend/kb/articles.csv` using TF-IDF/bag-of-words cosine similarity.
+**Purpose**: Search the live FAQ corpus in SQLite FTS5 (`backend/data/support.db`), seeded from `backend/kb/articles.csv` (SAD ADR-20). Same `RetrieverOutput` contract as the former TF-IDF tool (ADR-13).
 
 **Implementation**:
-- Loads CSV on startup (12 B-Mobile FAQ rows: id, title, body)
-- Builds TF-IDF vectorizer over title + body corpus
-- `stop_words='english'`, `max_features=500`, `ngram_range=(1,2)`
-- Query → TF-IDF vector → cosine similarity vs corpus
-- Returns top-k passages above `KB_SIMILARITY_FLOOR` (default 0.35)
-- Sets `gap=true` if no passages meet floor
+- Opens `KB_DB_PATH` (created/seeded by `ensure_database()` on startup)
+- FTS5 `MATCH` over title + body; AND of content tokens; English stopwords
+- Score `min(1.0, abs(bm25) / 10.0)`; keep passages ≥ `KB_SIMILARITY_FLOOR` (default 0.35)
+- Top-k via `KB_TOP_K` (default 3); `gap=true` if none meet the floor
 
 **Configuration**:
-- `KB_DIR` (default: `backend/kb`)
-- `KB_FILE` (default: `articles.csv`)
+- `KB_DB_PATH` (default: `backend/data/support.db`)
+- `KB_DIR` / `KB_FILE` (CSV seed; `backend/kb` + `articles.csv`)
 - `KB_SIMILARITY_FLOOR` (default: `0.35`)
 
 **Output**: JSON string matching `RetrieverOutput` schema
+
+**Re-seed:** `python -m backend.scripts.migrate_kb_csv_to_sqlite`
 
 #### TicketStubTool
 
@@ -147,6 +151,14 @@ Nine structured models aligned with SAD §2 contracts:
 - Returns `STUB-{uuid}` format (8-char hex, uppercase)
 - No persistence or external API calls
 - Future: integrate with Zendesk/Intercom/etc.
+
+#### AccountLookupTool / OrderLookupTool
+
+Stub rows in `support.db` (`stub_accounts`, `stub_orders`) for HITL demos (`ACC-1001`, `ACC-2002`, `ORD-*`).
+
+### 3.2.1 HITL policy actions (`backend/approval_service.py`)
+
+After the crew maps to `ChatResponse`, `detect_policy_action()` may set `decision=pending_approval`. Vague “credit for outage” / “waive my fee” (no account/amount) still HITL with lookup # 1–100. Customer waits on SSE; manager decides in Telegram. Deny with a typed reason uses that text only; `/skip` uses contract boilerplate.
 
 ### 3.3 Crew Orchestration (`backend/crew.py`)
 
@@ -327,7 +339,7 @@ Writes `{LOG_DIR}/{trace_id}.json` per SAD §2 minimum schema:
 
 #### Lifecycle
 
-- Startup: Initialize `CustomerSupportCrew` instance (loads KB, builds TF-IDF index)
+- Startup: `ensure_database()` then `CustomerSupportCrew`; optional Telegram long-poll if `TELEGRAM_ENABLED=true`
 - Shutdown: Graceful cleanup
 - In-memory state: `crew_instance` (global), `last_result` (process-local, racy under concurrency)
 
@@ -365,14 +377,21 @@ Writes `{LOG_DIR}/{trace_id}.json` per SAD §2 minimum schema:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `AAMAD_TARGET_RUNTIME` | `crewai` | Runtime adapter (locked for MVP) |
-| `BACKEND_PORT` | `8000` | FastAPI listen port |
-| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | FE API base (for integration) |
+| `BACKEND_PORT` | `8000` in `.env.example`; local demo often **8001** | FastAPI listen port |
+| `NEXT_PUBLIC_API_BASE_URL` | `http://127.0.0.1:8001` | FE API base |
+| `CHAT_TIMEOUT_SECONDS` | `180` | Crew wall-clock for JSON + SSE |
 | `MAX_ITER` | `12` | Max iterations per agent |
 | `MAX_RPM` | `10` | Max requests per minute (crew) |
 | `CLASSIFIER_CONFIDENCE_MIN` | `0.55` | Confidence threshold for escalation |
-| `KB_DIR` | `backend/kb` | Knowledge base directory |
-| `KB_FILE` | `articles.csv` | KB filename (CSV format) |
-| `KB_SIMILARITY_FLOOR` | `0.35` | TF-IDF retrieval threshold |
+| `KB_DIR` | `backend/kb` | CSV seed directory |
+| `KB_FILE` | `articles.csv` | Canonical FAQ export |
+| `KB_DB_PATH` | `backend/data/support.db` | Live FTS5 + stubs + approvals |
+| `KB_SIMILARITY_FLOOR` | `0.35` | FTS rank mapped to 0–1 gap floor |
+| `KB_TOP_K` | `3` | Max passages |
+| `TELEGRAM_ENABLED` | `false` | Start manager bot polling |
+| `TELEGRAM_BOT_TOKEN` | *(required if enabled)* | BotFather token |
+| `TELEGRAM_MANAGER_CHAT_ID` | *(required if enabled)* | Allow-listed chat (groups often negative) |
+| `HITL_TIMEOUT_SECONDS` | `300` | SSE wait for Approve/Deny |
 | `LOG_DIR` | `project-context/2.build/logs` | Prompt trace directory |
 | `OPERATOR_API_KEY` | *(optional)* | Gate for /api/last-result |
 
@@ -385,9 +404,8 @@ Writes `{LOG_DIR}/{trace_id}.json` per SAD §2 minimum schema:
 - `uvicorn[standard]>=0.24.0` — ASGI server
 - `pydantic>=2.5.0` — Data validation
 
-**ML/NLP**:
-- `scikit-learn>=1.3.0` — TF-IDF vectorizer
-- `numpy>=1.24.0` — Array operations
+**ML/NLP** (legacy; live retrieval is stdlib `sqlite3` FTS5):
+- `scikit-learn>=1.3.0` / `numpy` — still listed in `requirements.txt`; **unused** after ADR-20
 
 **LLM**:
 - `openai>=1.0.0` — OpenAI provider (also used for Ollama Cloud via LiteLLM compatibility)
@@ -442,12 +460,26 @@ Writes `{LOG_DIR}/{trace_id}.json` per SAD §2 minimum schema:
 | `started` | `{ "trace_id": "uuid" }` | Kickoff accepted |
 | `stage` | `{ "trace_id", "agent", "status": "running"\|"completed", "summary"? }` | CrewAI `task_callback` |
 | `heartbeat` | `{ "trace_id" }` | Every 15s while crew runs |
+| `approval_required` | `{ approval_id, reply_pending, response }` | HITL wait — manager notified on Telegram |
+| `approval_decided` | `{ outcome, reply, response }` | Approved or denied |
+| `approval_timeout` | `{ reply, response }` | No decision within `HITL_TIMEOUT_SECONDS` |
 | `complete` | `{ "response": ChatResponse }` | HTTP 200 stream end |
 | `error` | `{ "response": ChatResponse }` | Error envelope; still valid `ChatResponse` |
 
 **Implementation:** `backend/streaming.py`, shared mapper in `backend/chat_service.py`.
 
-**Timeout:** `CHAT_TIMEOUT_SECONDS` env (default **180**).
+**Timeout:** `CHAT_TIMEOUT_SECONDS` env (default **180**). HITL wait is `HITL_TIMEOUT_SECONDS` (default **300**) after `approval_required`.
+
+### GET /api/approvals/* and POST /api/approvals/{id}/decide
+
+SQLite-backed queue used by Telegram and the read-only `/operator` page.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| GET | `/api/approvals/pending` | Open requests |
+| GET | `/api/approvals/history` | Recent decided |
+| GET | `/api/approvals/{id}/status` | Includes `customer_reply` for UI poll fallback |
+| POST | `/api/approvals/{id}/decide` | `{ decision: approve\|deny, operator_note? }` |
 
 ### POST /api/chat (legacy JSON)
 
@@ -573,22 +605,21 @@ Writes `{LOG_DIR}/{trace_id}.json` per SAD §2 minimum schema:
 2. Install dependencies: `pip install -r backend/requirements.txt`
 3. Verify `backend/kb/articles.csv` exists with 12 rows
 
-**Start Server**:
+**Start Server** (repo root):
 ```bash
-cd backend
-python main.py
-# Server starts on http://localhost:8000
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
+# Server starts on http://127.0.0.1:8001
 ```
 
 **Test Health**:
 ```bash
-curl http://localhost:8000/health
+curl http://127.0.0.1:8001/health
 # Expected: {"status":"ok"}
 ```
 
 **Test Path A (Resolve)**:
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://127.0.0.1:8001/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "How do I reset my B-Mobile My Account PIN?",
@@ -600,7 +631,7 @@ curl -X POST http://localhost:8000/api/chat \
 
 **Test Path B (Escalate - Gap)**:
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://127.0.0.1:8001/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "What is your quantum warranty for the hardware drone?",
@@ -611,7 +642,7 @@ curl -X POST http://localhost:8000/api/chat \
 
 **Test Path C (Escalate - Request Human)**:
 ```bash
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://127.0.0.1:8001/api/chat \
   -H "Content-Type: application/json" \
   -d '{
     "message": "I want to talk to a human now - this billing charge is ridiculous!",
@@ -631,7 +662,7 @@ cat project-context/2.build/logs/{trace_id}.json
 ### Integration Testing
 
 **With Frontend** (Integration Epic):
-1. Frontend sends `POST /api/chat` with `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`
+1. Frontend streams `POST /api/chat/stream` with `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001`
 2. Verify CORS allows `localhost:3000` and `127.0.0.1:3000`
 3. Map response fields to chat UI + operator strip
 4. Test error path (stop backend mid-request) → safe message + Talk-to-human CTA
@@ -652,8 +683,9 @@ Recommended test coverage:
 
 ### MVP Scope Constraints
 
-**Out of Scope** (per Backend persona prohibited-actions and PRD §10.3):
-- ❌ Persistent database or session storage
+**Out of Scope** (per Backend persona prohibited-actions and PRD §10.3, **except** the ADR-20/21 demo store):
+- ❌ Conversation-history / session database (P2)
+- ✅ Local SQLite `support.db` for FAQ FTS5, stub accounts/orders, HITL rows (ADR-20/21)
 - ❌ Live Zendesk/Intercom/CRM integration (stub only)
 - ✅ SSE orchestration progress (`POST /api/chat/stream`) — 2026-08-27
 - ❌ LLM token streaming via SSE/WebSocket (future)
@@ -672,8 +704,8 @@ Recommended test coverage:
 ### Technical Debt
 
 1. **Concurrency**: Single process, `last_result` is racy under concurrent requests (acceptable for course demo)
-2. **KB Indexing**: TF-IDF built on startup; no incremental updates without restart
-3. **Timeout Granularity**: 45s wall-clock wins over per-task caps; partial steps on timeout
+2. **KB Indexing**: FTS5 rebuilt when `ensure_database` / migrate script runs; edit CSV then re-migrate
+3. **Timeout Granularity**: `CHAT_TIMEOUT_SECONDS` (default 180) for crew; HITL wait is separate (300s)
 4. **Error Resilience**: No retry logic on transient LLM failures (relying on crew `max_retry_limit`)
 5. **Observability**: Basic structured logs; no APM/tracing (e.g., Datadog, Sentry)
 
@@ -728,10 +760,9 @@ cp .env.example .env
 cat backend/kb/articles.csv
 # Should show 12 B-Mobile FAQ rows
 
-# Run server
-cd backend
-python main.py
-# Server starts on http://0.0.0.0:8000
+# Run server (repo root)
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
+# Server starts on http://127.0.0.1:8001
 ```
 
 **Logs**:
@@ -865,15 +896,15 @@ Recommended pipeline stages:
    - OpenAI: Uses `gpt-4o-mini` or specified tier models
    - Ollama: Uses Ollama Cloud at `https://ollama.com/v1` with `gemma4:31b` or specified model via LiteLLM OpenAI-compatible route
 2. Seed KB `backend/kb/articles.csv` committed in repo with 12 B-Mobile FAQ rows
-3. TF-IDF/bag-of-words retrieval meets demo stability needs (embedding optional post-MVP)
-4. Non-streaming JSON API acceptable for MVP; StatusLine uses local FE animation (SAD ADR-15)
+3. Live retrieval is SQLite FTS5 (ADR-20); CSV remains the hand-authored seed. Embedding / managed vector SaaS still deferred.
+4. Primary UI transport is SSE progress (not LLM tokens). Legacy JSON `POST /api/chat` remains for scripts.
 5. Single backend process acceptable for ≥5 concurrent demo sessions (best-effort)
 6. Operator strip fed from last ChatResponse in FE UI state; `/api/last-result` optional polish only (SAD ADR-14)
 7. Gap/refuse → escalate per SAD ADR-16 **unless** MVP guardrails apply (greeting, low-urgency calm, out-of-scope) — see § Guardrails
 8. Sentiment gates per SAD ADR-17 (not negative-alone escalation; protects Path A)
-9. 45s wall-clock timeout authoritative; per-task caps are guidance (SAD ADR-18)
+9. Crew wall-clock timeout is `CHAT_TIMEOUT_SECONDS` (default 180); original SAD ADR-18 45s is superseded for this Ollama-backed demo
 10. Model tiers (low/mid) configured via env; no per-agent model env vars (SAD ADR-19)
-11. No database, live ticketing, or MCP in MVP per Backend persona prohibited-actions
+11. No live ticketing or MCP. Local SQLite demo store is in scope (ADR-20/21); conversation-history DB remains Future Work
 12. `meta.ai_disclosure=true` always; `disclosure_acknowledged` echoed when provided (AC-01b)
 13. Prompt traces redact secrets/PII; message truncated to 200 chars in trace
 14. Python 3.10+ runtime; dependencies compatible per requirements.txt
@@ -954,26 +985,25 @@ pip install -r backend/requirements.txt
 cat backend/kb/articles.csv
 # Should show 12 B-Mobile FAQ rows
 
-# 3. Start server
-cd backend
-python main.py
-# Server on http://localhost:8000
+# 3. Start server (from repo root)
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
+# Server on http://127.0.0.1:8001
 
 # 4. Test health
-curl http://localhost:8000/health
+curl http://127.0.0.1:8001/health
 
 # 5. Test Path A (resolve)
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://127.0.0.1:8001/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "How do I reset my B-Mobile My Account PIN?", "request_human": false}'
 
 # 6. Test Path B (escalate - gap)
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://127.0.0.1:8001/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What is your quantum warranty for the hardware drone?", "request_human": false}'
 
 # 7. Test Path C (escalate - request_human)
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://127.0.0.1:8001/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "I want to talk to a human!", "request_human": true}'
 
@@ -990,6 +1020,7 @@ ls -l project-context/2.build/logs/
 | 2026-08-23T19:30:00Z | @backend.eng | develop-be | Initial backend implementation complete; all 9 models, 4 agents, 2 tools, FastAPI endpoints, seed KB with OpenAI support |
 | 2026-08-23T20:30:00Z | @backend.eng | update-llm-config | Added Ollama Cloud provider support via `LLM_PROVIDER` env var; implemented LiteLLM OpenAI-compatible route; added `OLLAMA_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL` configuration; updated documentation sections |
 | 2026-08-25T23:05:00Z | @backend.eng | externalize-yaml | Extracted agent and task definitions to `backend/config/agents.yaml` and `backend/config/tasks.yaml` per CrewAI adapter rules; updated crew.py to load from YAML with dynamic value injection; added pyyaml dependency; fully compliant with SAD §2 YAML externalization requirement |
+| 2026-08-28T23:45:00-05:00 | @backend.eng | sync-docs | Documented SQLite FTS5 (ADR-20), Telegram HITL (ADR-21), SSE HITL events, approval APIs, 180s crew / 300s HITL timeouts, port 8001 demo |
 
 ---
 

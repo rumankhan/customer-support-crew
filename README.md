@@ -1,10 +1,12 @@
 # Multi-Agent Customer Support Crew
 
-Chat-first MVP for **B-Mobile**, a fictional consumer mobile carrier. Four specialized [CrewAI](https://www.crewai.com/) agents give a customer either a **knowledge-grounded answer with citations** or a **clean human escalation with a full context packet**.
+Chat-first MVP for **B-Mobile**, a fictional consumer mobile carrier. Four specialized [CrewAI](https://www.crewai.com/) agents give a customer either a **knowledge-grounded answer with citations** or a **clean human escalation with a full context packet**. Policy exceptions (billing credit, ETF waiver) pause the chat until a **manager approves or denies in Telegram**.
 
 This is a course/demo orchestration layer — not a CCaaS or live ticketing suite. It is built with the [AAMAD](https://pypi.org/project/aamad/) (AI-Assisted Multi-Agent Application Development) workflow.
 
-**MVP user value:** grounded resolve **or** trustworthy handoff — without a blind queue or a black-box FAQ bot.
+**MVP user value:** grounded resolve, trustworthy handoff, or manager-gated policy action — without a blind queue or a black-box FAQ bot.
+
+Step-by-step local run: [`RUNNING.md`](RUNNING.md).
 
 ---
 
@@ -12,40 +14,45 @@ This is a course/demo orchestration layer — not a CCaaS or live ticketing suit
 
 | Phase | State |
 |-------|--------|
-| **Define** | Complete — MRD, PRD, context summary, and SAD reviewed against each other (**PASS**, 2026-08-14) |
-| **Build** | Backend crew live + SSE streaming; frontend wired to API |
-| **Deliver** | Not started |
+| **Define** | Complete — MRD, PRD, SAD, and SFS for SQLite KB + HITL |
+| **Build** | Complete for this MVP — live crew, SSE streaming, SQLite FTS5 retrieval, Telegram HITL |
+| **Deliver** | Not started (`project-context/3.deliver/`) |
 
 **Runtime:** `crewai` (locked for this course MVP).  
 **Window:** 2026-08-01 → 2026-09-12.
 
-Canonical architecture stays in [`project-context/1.define/sad.md`](project-context/1.define/sad.md). Build logs and epic notes will live under `project-context/2.build/`.
+Canonical architecture: [`project-context/1.define/sad.md`](project-context/1.define/sad.md) (ADR-20 SQLite FTS5, ADR-21 Telegram HITL).  
+Build notes: `project-context/2.build/`. Feature specs: `project-context/1.define/sfs/`.
 
 ---
 
 ## What it does
 
-A customer opens a web chat, sees an AI disclosure, and sends a message. The backend runs a sequential crew:
+A customer opens the web chat, acknowledges the AI disclosure, and sends a message. The backend runs a sequential crew:
 
 ```
 query_classifier → knowledge_retriever → response_specialist → escalation_manager
 ```
 
-The API returns a **`ChatResponse`** after the crew finishes. The browser uses **SSE progress streaming** (`POST /api/chat/stream`) so long runs do not hit proxy timeouts; a legacy non-streaming `POST /api/chat` remains for scripts.
+The browser uses **SSE progress streaming** (`POST /api/chat/stream`). A legacy JSON `POST /api/chat` remains for scripts.
 
 | Demo path | Example | Expected |
 |-----------|---------|----------|
-| **A** — in-KB FAQ | `How do I reset my B-Mobile My Account PIN?` | `decision=resolve`, citations, no packet |
-| **B** — unknown in-scope topic | Obscure B-Mobile question not in KB | `decision=resolve` when low urgency + neutral; polite gap reply (no human-agent pitch) |
-| **B′** — out of scope | `What is the capital of France?` | `decision=resolve`, B-Mobile-scope boundary message; no human-agent recommendation |
-| **C** — request human | Billing complaint with `request_human=true` | `decision=escalate`, `reason_codes` include `request_human`, all four steps |
-| **G** — greeting | `hello` | `decision=resolve`, friendly welcome; no STUB / specialist banner |
+| **A** — in-KB FAQ | `How do I reset my B-Mobile My Account PIN?` | `decision=resolve`, citations |
+| **B** — unknown in-scope topic | Obscure B-Mobile question not in KB | `decision=resolve` when low urgency + neutral; polite gap reply |
+| **B′** — out of scope | `What is the capital of France?` | Scope-only reply; no human-agent pitch |
+| **C** — request human | Billing complaint with **I'd rather talk to a person** | `decision=escalate`, packet + stub ticket |
+| **G** — greeting | `hello` | Friendly welcome; no specialist banner |
+| **HITL** — billing credit | `Apply a $25 credit to ACC-1001 for the outage last week` or `credit for outage` | Chat waits; manager **Approve/Deny** in Telegram |
+| **HITL** — ETF waiver | `Cancel my plan and waive the $150 ETF on ACC-2002` or `can you waive my fee` | Same Telegram gate; deny can include a manager reason |
 
-**Guardrails** (greeting resolve, low-urgency calm resolve, out-of-scope copy, neutral-sentiment UI): see [`RUNNING.md`](RUNNING.md#guardrails-2026-08-27) and `project-context/2.build/backend.md`.
+Vague credit/fee requests (no `ACC-*` / dollar amount) still go to HITL with a random **lookup # 1–100** (`REF-{n}`, proposed amount `$n`).
 
-**In MVP:** Next.js UI, FastAPI gateway, local CSV KB (≥10 **B-Mobile** FAQ rows in `backend/kb/articles.csv`), in-memory ticket stub, operator strip, Prompt Trace files, **SSE crew progress stream**.
+**Guardrails** (greeting resolve, low-urgency calm resolve, out-of-scope copy): [`RUNNING.md`](RUNNING.md#guardrails-2026-08-27) and `project-context/2.build/backend.md`.
 
-**Out of MVP:** live Zendesk/Intercom, LLM token streaming, multi-turn clarifier, CSAT dashboard, database, SSO, voice, CRM writes, fifth agent, biometric emotion.
+**In MVP:** Next.js chat + `/operator` projector queue, FastAPI gateway, CrewAI YAML crew, **SQLite FTS5** KB (`backend/data/support.db`, seeded from `backend/kb/articles.csv`), stub accounts/orders, in-memory ticket stub, specialist strip (read-only), Prompt Trace files, SSE crew progress, **Telegram manager HITL**.
+
+**Out of MVP:** live Zendesk/Intercom, LLM token streaming, multi-turn clarifier, CSAT dashboard, conversation-history DB, SSO, voice, real CRM writes, Approve/Deny on the customer page, fifth agent, biometric emotion.
 
 ---
 
@@ -54,12 +61,13 @@ The API returns a **`ChatResponse`** after the crew finishes. The browser uses *
 | Layer | Choice |
 |-------|--------|
 | Frontend | Next.js (App Router) + TypeScript + Tailwind |
-| Backend | Python + FastAPI + CrewAI (YAML agents/tasks) |
-| Retrieval | TF-IDF / bag-of-words over `backend/kb/articles.csv` (floor `0.35`) |
-| LLM | OpenAI-compatible; tiers `OPENAI_MODEL_LOW` / `OPENAI_MODEL_MID` |
-| Transport | **SSE progress** (`POST /api/chat/stream`) + legacy JSON (`POST /api/chat`) |
+| Backend | Python + FastAPI + CrewAI (`backend/config/agents.yaml` + `tasks.yaml`) |
+| Retrieval | **SQLite FTS5** over `backend/data/support.db` (CSV is the canonical seed/export); floor `KB_SIMILARITY_FLOOR=0.35` |
+| HITL | Application approval queue + Telegram bot (`TELEGRAM_*`); not CrewAI `human_input` |
+| LLM | OpenAI-compatible; `LLM_PROVIDER=openai` (tiered `OPENAI_MODEL_LOW` / `OPENAI_MODEL_MID`) or `ollama` (`OLLAMA_MODEL`) |
+| Transport | **SSE** `POST /api/chat/stream` (primary) + JSON `POST /api/chat` (legacy) |
 
-Acceptance criteria for QA: `AC-01` … `AC-06` in the [PRD](project-context/1.define/prd.md).
+Acceptance criteria: `AC-01` … `AC-06` in the [PRD](project-context/1.define/prd.md).
 
 ---
 
@@ -68,11 +76,16 @@ Acceptance criteria for QA: `AC-01` … `AC-06` in the [PRD](project-context/1.d
 ```
 .
 ├── project-context/
-│   ├── 1.define/          # MRD, PRD, SAD, context summary  ← current source of truth
-│   ├── 2.build/           # setup / frontend / backend / integration / qa (not yet)
+│   ├── 1.define/          # MRD, PRD, SAD, SFS, context summary
+│   ├── 2.build/           # backend / frontend / integration / qa
 │   └── 3.deliver/         # deploy.md + user-guide (not yet)
-├── backend/               # FastAPI + CrewAI; seed FAQs in backend/kb/articles.csv
-├── frontend/              # Next.js B-Mobile support UI (mocks until Integration)
+├── backend/               # FastAPI + CrewAI
+│   ├── config/            # agents.yaml, tasks.yaml
+│   ├── kb/articles.csv    # seed FAQs (canonical export)
+│   ├── data/support.db    # live FTS5 KB + stubs + approvals (local, not committed)
+│   └── scripts/           # migrate KB, Telegram chat id, validators
+├── frontend/              # Next.js B-Mobile support UI
+├── RUNNING.md             # local run, Telegram setup, demo script
 ├── .cursor/               # AAMAD personas, rules, templates
 ├── AGENTS.md
 └── CHECKLIST.md
@@ -85,46 +98,53 @@ Acceptance criteria for QA: `AC-01` … `AC-06` in the [PRD](project-context/1.d
 | Market research | [`project-context/1.define/mrd.md`](project-context/1.define/mrd.md) |
 | Product requirements | [`project-context/1.define/prd.md`](project-context/1.define/prd.md) |
 | Architecture (SAD) | [`project-context/1.define/sad.md`](project-context/1.define/sad.md) |
+| HITL feature spec | [`project-context/1.define/sfs/hitl-policy-action-approval.md`](project-context/1.define/sfs/hitl-policy-action-approval.md) |
+| KB feature spec | [`project-context/1.define/sfs/kb-sqlite-retrieval.md`](project-context/1.define/sfs/kb-sqlite-retrieval.md) |
 | Handoff brief | [`project-context/1.define/context-summary.md`](project-context/1.define/context-summary.md) |
 
 ---
 
 ## How to continue (AAMAD)
 
-Work is persona-driven in Cursor. Do not implement the full stack in one chat.
+Build-phase personas already produced the live MVP. Remaining work is **Deliver** (`@devops.eng`) after QA/security gates, plus any scoped demo polish.
 
-1. `@project.mgr` — scaffold `frontend/`, `backend/`, `backend/config/`, `backend/kb/`, `.env.example`, `setup.md`
-2. `@backend.eng` — YAML crew, named Pydantic outputs, `kb_search` + `ticket_stub`, `POST /api/chat`
-3. `@frontend.eng` — chat UI against **mocks** (no live API)
-4. `@integration.eng` — wire `NEXT_PUBLIC_API_BASE_URL` to `/api/chat`
-5. `@qa.eng` — unit + integration vs `AC-01`…`AC-06`
+Historical epic order (already executed):
+
+1. `@project.mgr` — scaffold `frontend/`, `backend/`, `.env.example`
+2. `@backend.eng` — YAML crew, named Pydantic outputs, `kb_search` + `ticket_stub`, chat API
+3. `@frontend.eng` — chat UI
+4. `@integration.eng` — SSE stream + `NEXT_PUBLIC_API_BASE_URL`
+5. `@qa.eng` — `AC-01`…`AC-06` in `qa.md`
 6. `@devops.eng` — CI, `deploy.md`, user guide (after QA)
 
-Step-by-step commands: [`CHECKLIST.md`](CHECKLIST.md).  
+Step-by-step framework commands: [`CHECKLIST.md`](CHECKLIST.md).  
 Optional gate: `aamad validate --phase define|build|deliver`.
 
 ---
 
 ## Local run
 
-**Frontend (mocks, no Python venv):**
+**Do not commit `.env`.** Copy `.env.example` → `.env` at the repo root. Copy `frontend/.env.example` → `frontend/.env.local`.
+
+This machine’s working ports are **frontend 3000** and **backend 8001** (8000 is often taken). Point `NEXT_PUBLIC_API_BASE_URL` at `http://127.0.0.1:8001`.
+
+From the **repo root**:
 
 ```bash
+# Terminal 1 — backend
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
+
+# Terminal 2 — frontend
 cd frontend
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Chat window: your messages on the right, B-Mobile on the left. Seeded happy path: `How do I reset my B-Mobile My Account PIN?` then **Get help** (**I'd rather talk to a person** unchecked). **Start new conversation** (next to Get help after a thread exists) clears the tab. Stubs load `backend/kb/articles.csv` (mock `GET /api/kb` + `frontend/lib/kb.ts`). CrewAI is **not** called yet — Integration will replace `frontend/lib/api.ts` / `runService.ts` with `POST ${NEXT_PUBLIC_API_BASE_URL}/api/chat`.
+Open http://localhost:3000. Acknowledge the AI disclosure, then try Path A: `How do I reset my B-Mobile My Account PIN?`
 
-**Backend (when FastAPI + crew exist):**
+Crew timeout is `CHAT_TIMEOUT_SECONDS` (default **180s**). HITL wait is `HITL_TIMEOUT_SECONDS` (default **300s**); the browser aborts around **500s** so the manager has time to reply. CORS allowlist: `http://localhost:3000` and `http://127.0.0.1:3000`.
 
-1. Copy `.env.example` → `.env` and set `OPENAI_API_KEY` (never commit secrets).
-2. Activate `.venv`, run `uvicorn` on port **8000** (`GET /health` → `{ "status": "ok" }`).
-3. Point the frontend at the API with `NEXT_PUBLIC_API_BASE_URL`.
-4. CORS allowlist: `http://localhost:3000` and `http://127.0.0.1:3000`.
-
-Soft timeout is **45s** on the API; the chat client should abort at **50–60s**.
+Telegram HITL, demo lines, and troubleshooting: [`RUNNING.md`](RUNNING.md). Ollama Cloud: [`OLLAMA_SETUP.md`](OLLAMA_SETUP.md).
 
 ---
 

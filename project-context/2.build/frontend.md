@@ -2,12 +2,19 @@
 
 **Persona**: `@frontend.eng`  
 **Action**: `*document-frontend`  
-**Status**: MVP chat UI complete (mocks + seed KB; single `postChat` → JSON `ChatResponse`; no live `POST /api/chat`)  
-**Resolved runtime**: `crewai` (default; `AAMAD_TARGET_RUNTIME` unset; PRD locks CrewAI)  
+**Status**: Live chat via SSE (`POST /api/chat/stream`); HITL pending bubble; read-only `/operator` queue. Original FE epic used mocks (historical sections below).  
+**Resolved runtime**: `crewai`  
 **Feature ID**: FE-CRW-001  
-**Primary UI**: single route `/`
+**Primary UI**: `/` (customer) and `/operator` (projector)
 
-This file is the single frontend artifact: **behavior contract** (Inputs / Run / Results / History) plus **implementation log** (layout, styling, Integration hooks). Former `frontend-funcional-spec.md` content lives here — **do not split** into a second markdown file.
+### Current state (2026-08-28)
+
+- `useResearchWorkflow` streams `POST /api/chat/stream` (Next.js proxy `frontend/app/api/chat/stream/route.ts`). Client abort **~500s** to cover crew + HITL.
+- `ChatResponse.decision` may be `pending_approval`; specialist strip is **read-only** (lookup #, deny reason). Approve/Deny is **Telegram only**.
+- `/operator` shows the approval projector queue (no buttons).
+- `GET /api/kb` still serves the CSV for offline demos; live answers come from crew `kb_search` (SQLite FTS5).
+
+This file is the single frontend artifact: **behavior contract** (Inputs / Run / Results / History) plus **implementation log**. Former `frontend-funcional-spec.md` content lives here — **do not split** into a second markdown file.
 
 ---
 
@@ -483,3 +490,12 @@ Update this table **after every commit** that touches `frontend/` or this file. 
 - **Resolved runtime**: `crewai` (default; `AAMAD_TARGET_RUNTIME` unset)
 - **Prompt Trace**: omitted — UI mocks only
 - **Notes**: Replaced startRun/poll with single `postChat`; ADR-15 stop timer + snap `steps[]`; pasted ChatRequest/ChatResponse envelope; escalate CTA on `error != null`; dropped leftover History/Results; skipped localStorage; documented light theme; `npm run build` PASS; no second spec file
+
+### Audit (append)
+
+- **Timestamp**: 2026-08-28T23:45:00-05:00
+- **Persona**: `frontend-eng`
+- **Action**: `sync-docs`
+- **Resolved runtime**: `crewai`
+- **Prompt Trace**: omitted
+- **Notes**: Documented live SSE chat, HITL pending wait (~500s abort), `/operator` projector, Telegram-only Approve/Deny

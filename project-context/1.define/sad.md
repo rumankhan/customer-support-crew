@@ -4,8 +4,8 @@
 **MRD**: `project-context/1.define/mrd.md`  
 **User Stories**: N/A (not yet authored; trace to PRD `AC-01`…`AC-06`)  
 **Context Summary**: `project-context/1.define/context-summary.md`  
-**MVP Scope**: Grounded chat resolve **or** clean human escalate with context packet  
-**Selected Runtime**: `crewai` (locked per PRD; `AAMAD_TARGET_RUNTIME` unset → default)
+**MVP Scope**: Grounded chat resolve, clean human escalate with context packet, or Telegram-gated policy action (HITL)  
+**Selected Runtime**: `crewai` (locked per PRD)
 
 ---
 
@@ -13,11 +13,11 @@
 
 ### System description
 
-The Multi-Agent Customer Support Crew is a chat-first MVP that runs four specialized CrewAI agents in a sequential pipeline so a **B-Mobile** customer (fictional consumer mobile carrier) receives either a **knowledge-grounded answer with citations** or a **clean human escalation with a full context packet**. It is an orchestration layer for demo/course delivery—not a CCaaS or live ticketing suite replacement (MRD/PRD).
+The Multi-Agent Customer Support Crew is a chat-first MVP that runs four specialized CrewAI agents in a sequential pipeline so a **B-Mobile** customer (fictional consumer mobile carrier) receives a **knowledge-grounded answer with citations**, a **clean human escalation with a full context packet**, or a **manager-gated policy action** (billing credit / ETF waiver via Telegram). It is an orchestration layer for demo/course delivery—not a CCaaS or live ticketing suite replacement (MRD/PRD).
 
 **Demo domain:** B-Mobile prepaid/postpaid consumer support — plans, billing, SIM/eSIM, roaming, device orders, number porting. Not a SaaS product FAQ bot.
 
-**MVP user value:** grounded resolve **or** trustworthy handoff—without a blind queue or black-box FAQ bot.
+**MVP user value:** grounded resolve, trustworthy handoff, or manager-gated policy action—without a blind queue or black-box FAQ bot.
 
 ### Main functions
 
@@ -63,7 +63,7 @@ Browser (Next.js) ──POST /api/chat──► FastAPI ──kickoff──► C
 | **MVP** | Next.js chat + disclosure; FastAPI; CrewAI sequential crew; local KB; ticket stub; operator strip; non-streaming JSON |
 | **Future (P1/P2)** | Live ticketing, streaming UI, multi-turn clarifier, CSAT dashboard, DB/history, SSO, voice, CRM writes, cloud vector DB, 5th agent, Ollama / OpenAI-compatible local base URL, `high` model tier, API rate limiting |
 
-**Explicit exclusions (MVP):** persistent database, Zendesk/Intercom live APIs, biometric emotion, horizontal autoscaling, MCP servers, hierarchical CrewAI process, Ollama as a required runtime path, per-agent model env vars, API rate limiting.
+**Explicit exclusions (MVP):** conversation-history database, Zendesk/Intercom live APIs, biometric emotion, horizontal autoscaling, MCP servers, hierarchical CrewAI process, per-agent model env vars, API rate limiting. **In MVP (extensions):** local SQLite demo store (`support.db`) for FTS5 KB + HITL (ADR-20/21); SSE **orchestration** progress (not LLM tokens); Ollama Cloud as an allowed `LLM_PROVIDER`.
 
 ### Stakeholders (concern → architecture)
 
@@ -105,10 +105,13 @@ Browser (Next.js) ──POST /api/chat──► FastAPI ──kickoff──► C
 ```
 frontend/
   app/page.tsx                 # Disclosure, ChatWindow, RunStatus, SpecialistStrip
-  app/api/kb/route.ts          # Mock-only: serve articles.csv (not POST /api/chat)
+  app/operator/page.tsx        # Read-only HITL projector queue
+  app/api/kb/route.ts          # Offline CSV loader (not the live chat contract)
+  app/api/chat/stream/route.ts # SSE proxy to FastAPI
+  app/api/approvals/           # Proxy to FastAPI approval APIs
   components/                  # ChatWindow, InputsForm, RunStatus,
                                # SpecialistStrip, DisclosureBanner, FutureWorkStubs
-  lib/types.ts, api.ts, mockResponse.ts, kb.ts, uiCopy.ts
+  lib/types.ts, api.ts, chatStream.ts, useResearchWorkflow.ts, uiCopy.ts
 ```
 
 **KB loading (locked)**
@@ -116,14 +119,15 @@ frontend/
 | Layer | How the corpus is read |
 |-------|------------------------|
 | Canonical file | `backend/kb/articles.csv` — columns `id`, `title`, `body`; one FAQ per row; RFC4180 quoting |
-| Backend (`kb_search`) | Load `{KB_DIR}/{KB_FILE}` (defaults `backend/kb` + `articles.csv`). Each row is one document. Score with TF-IDF / bag-of-words (or keyword overlap); floor `KB_SIMILARITY_FLOOR=0.35` → `gap=true` |
-| Frontend mocks (until Integration) | `searchKb()` in `lib/kb.ts` over rows fetched from mock `GET /api/kb` (reads that CSV from disk). Path A hit / Path B miss must match the canonical demo queries below |
+| Live retrieval (`kb_search`) | SQLite FTS5 in `backend/data/support.db` (ADR-20). Score = `min(1.0, abs(bm25)/10.0)`; floor `KB_SIMILARITY_FLOOR=0.35` → `gap=true` |
+| CSV role | Canonical seed/export; `python -m backend.scripts.migrate_kb_csv_to_sqlite` |
+| Frontend `GET /api/kb` | Optional offline CSV view. Live chat uses crew `kb_search`, not this route |
 
 **UI requirements:** sources on resolve; escalate CTA on error; **I'd rather talk to a person** always available in the composer; responsive 375px / 1280px. Accessibility from PRD: keyboard send (Enter), focusable controls, adequate contrast for demo. Layout is a **chat window** (You right / B-Mobile left) plus Status under the chat and a **For specialists** strip. Stub I/O (`ChatRequest` / `ChatResponse`) is unchanged. **Start new conversation** clears the in-tab thread (SAD DB/history remains Future Work).
 
 **Visual direction (from PRD §6):** light color theme; modern fonts (e.g. via `next/font`); MVP defaults to light mode. SAD owns behavior contracts only — detailed styling belongs in `frontend.md`.
 
-**StatusLine UX contract (non-streaming MVP):** API returns one JSON after full `kickoff` — do **not** invent SSE/WebSocket/streaming.
+**StatusLine UX contract:** Primary transport is **SSE orchestration progress** (`POST /api/chat/stream`). Optimistic local labels apply only until the first `stage` event. HITL emits `approval_required` then `approval_decided` / `approval_timeout`. Legacy JSON `POST /api/chat` remains for scripts (no Telegram wait).
 
 | Event | Behavior |
 |-------|----------|
@@ -168,13 +172,13 @@ frontend/
 
 FE treats **any** `ChatResponse` with `error != null` or `decision=escalate` + Talk-to-human CTA as the safe failure UX. Prefer **200 + error object** for kickoff failures so Integration maps one schema.
 
-**FE client timeout:** `fetch` / abort after **50–60s** (slightly above API soft timeout **45s**). On abort: stop StatusLine; show safe message + Talk-to-human CTA (same as AC-06b).
+**FE client timeout:** abort after **~500s** so HITL (`HITL_TIMEOUT_SECONDS=300`) plus crew time can finish. On abort: stop StatusLine; show safe message + Talk-to-human CTA (AC-06b).
 
 **Success response (non-streaming) — `ChatResponse`**
 
 ```json
 {
-  "decision": "resolve|escalate",
+  "decision": "resolve|escalate|pending_approval",
   "reply": "string",
   "sources_used": [{"title": "string", "snippet": "string"}],
   "sentiment": "positive|neutral|negative",
@@ -374,7 +378,7 @@ On **resolve**, `EscalationOutput.packet` is `null` (or omitted) and mapper sets
 | Request disclosure fields | `meta` |
 | Exception / timeout path | `error` + escalate envelope; **minimal packet** when possible (see AC-06b policy) |
 
-**Retrieval default (MVP locked — ADR-13):** **TF-IDF / bag-of-words cosine** (or equivalent keyword overlap) over `backend/kb/articles.csv` — **no embedding dependency required** for Week 2–3 vertical slice. Floor **`KB_SIMILARITY_FLOOR=0.35`** (env override). No passage above floor → `gap=true` on `RetrieverOutput`. Optional hybrid embedding may be added later **without** changing crew topology; record algorithm + floor in `backend.md` Audit.
+**Retrieval (current — ADR-20):** **SQLite FTS5** over `backend/data/support.db`, seeded from `backend/kb/articles.csv`. Floor **`KB_SIMILARITY_FLOOR=0.35`**. No passage above floor → `gap=true` on `RetrieverOutput`. ADR-13 TF-IDF/CSV-direct scoring is **superseded** for live retrieval; CSV remains the authoring format. Optional embeddings may be added later without changing crew topology.
 
 **Prompt Trace minimum schema (`AC-02c`)** — write `{LOG_DIR}/{trace_id}.json` (redact secrets/PII; never store API keys):
 
@@ -402,25 +406,27 @@ On **resolve**, `EscalationOutput.packet` is `null` (or omitted) and mapper sets
 | Path A (hit) | FAQs must cover My Account PIN reset, billing/invoice, device shipping/ETA, returns/refunds, plan upgrade, account email change (plus roaming, eSIM, lost/stolen, porting, voicemail, data usage) |
 | Path B (miss) | No FAQ for demo query about **quantum warranty on physical hardware** (or equivalent out-of-corpus topic) |
 | Path C | Driven by `request_human=true` (primary); high risk optional — do not rely on negative-only |
-| Loader | Backend `kb_search` reads this file. FE mocks may read the same file (not a second corpus). |
+| Loader | Seed via CSV → SQLite. Live `kb_search` reads FTS5. `GET /api/kb` may still serve the CSV for offline UI. |
 
 **Canonical demo queries (QA / Integration)**
 
 | Path | Example user message | Expected |
 |------|----------------------|----------|
 | A | `How do I reset my B-Mobile My Account PIN?` (keep **neutral**; avoid angry wording) | `decision=resolve`, non-empty `sources_used`, `packet=null` |
-| B | `What is your quantum warranty for the hardware drone?` | `decision=escalate` (never resolve-only refuse), `reason_codes` include `retrieval_gap` and/or `refused`, `packet` + `stub_ticket_id` present |
+| B | `What is your quantum warranty for the hardware drone?` | Gap in KB. Guardrails may **resolve** with a polite miss when urgency is low and sentiment is calm; otherwise escalate with packet |
 | C | `I want to talk to a human now — this billing charge is ridiculous!` with `request_human=true` | `decision=escalate`, `reason_codes` include `request_human`, full `steps[]` (4), `packet` + `stub_ticket_id` |
+| HITL credit | `Apply a $25 credit to ACC-1001 for the outage last week` (or `credit for outage`) | `decision=pending_approval` until Telegram Approve/Deny |
+| HITL ETF | `Cancel my plan and waive the $150 ETF on ACC-2002` (or `can you waive my fee`) | Same HITL gate; deny reason from manager when provided |
 
 ### Runtime integration (crewai)
 
-1. FastAPI receives `ChatRequest` → validate → start **45s** wall-clock timeout guard.  
+1. FastAPI receives `ChatRequest` → validate → start wall-clock timeout (`CHAT_TIMEOUT_SECONDS`, default **180s**).  
 2. Build/cached crew from `backend/config/agents.yaml` + `tasks.yaml` + tool bindings.  
 3. `crew.kickoff(inputs={"message": ..., "request_human": ...})` with `Process.sequential` (always full chain, including when `request_human=true`).  
-4. Map task outputs → `ChatResponse` per mapper table (include `packet` / `stub_ticket_id` on escalate); write Prompt Trace (min schema above); update optional `last_result`.  
-5. Return JSON (**200** for success and post-kickoff error envelopes).
+4. Map task outputs → `ChatResponse` per mapper table; if policy action, `decision=pending_approval` and SSE waits on Telegram (`HITL_TIMEOUT_SECONDS`, default **300s**). Write Prompt Trace; update optional `last_result`.  
+5. Return JSON **or** SSE events (**200** for success and post-kickoff error envelopes).
 
-**Controls:** `max_iter ≤ 12`; `max_retry_limit ≥ 2`; crew `max_rpm` suggest **10**; wall-clock API soft timeout **45s** (wins over per-task sum). Suggest temperature **0.2** (low-tier agents), **0.4** (`response_specialist`).
+**Controls:** `max_iter ≤ 12`; `max_retry_limit ≥ 2`; crew `max_rpm` suggest **10**; crew timeout `CHAT_TIMEOUT_SECONDS` (default 180; ADR-18’s 45s was the original JSON-only target). Suggest temperature **0.2** (low-tier agents), **0.4** (`response_specialist`).
 
 **LLM model tiers (ADR-19):** Do **not** set a separate model env per agent. Map each agent to a **tier**; resolve tier → model name from env.
 
@@ -462,11 +468,11 @@ Tool failure on `kb_search` → treat as `gap=true` and continue (prefer escalat
 
 | Node | Process | Port | Health |
 |------|---------|------|--------|
-| Backend host | `uvicorn` FastAPI + CrewAI | `BACKEND_PORT` (8000) | `GET /health` → `{status: ok}` |
+| Backend host | `uvicorn` FastAPI + CrewAI | `BACKEND_PORT` (example **8001**) | `GET /health` → `{status: ok}` |
 | Frontend host | `next dev` / `next start` | 3000 | Load `/` |
-| Optional compose | services `frontend`, `backend` | published 3000/8000 | same |
+| Optional compose | services `frontend`, `backend` | published 3000/8001 | same |
 
-**Local run:** Terminal A = uvicorn; Terminal B = Next.js. Seed KB ≥10 FAQ rows in `backend/kb/articles.csv` (B-Mobile; demo queries A/B/C) by Week 2 exit.
+**Local run:** Terminal A = uvicorn from repo root; Terminal B = Next.js. See `RUNNING.md`. Seed KB ≥10 FAQ rows in `backend/kb/articles.csv` → SQLite FTS5.
 
 ### External systems and integration points
 
@@ -506,14 +512,20 @@ project-context/2.build/logs/   # Prompt Trace (runtime)
 | `OPENAI_MODEL_MID` | Mid-tier model (default `gpt-4.1-mini`) — response specialist only |
 | `OPENAI_MODEL` | Fallback if a tier env is unset (default `gpt-4o-mini`) |
 | `AAMAD_TARGET_RUNTIME` | `crewai` |
-| `BACKEND_PORT` | Default `8000` |
-| `NEXT_PUBLIC_API_BASE_URL` | FE → API base |
+| `BACKEND_PORT` | Default `8000` (local demo often **8001**) |
+| `NEXT_PUBLIC_API_BASE_URL` | FE → API base (`http://127.0.0.1:8001` in this repo’s working setup) |
 | `OPERATOR_API_KEY` | Optional gate for `/api/last-result` (`X-Operator-Key`) |
 | `LOG_DIR` | Default `project-context/2.build/logs` |
-| `KB_DIR` | Default `backend/kb` (load `articles.csv` from this directory) |
+| `KB_DIR` | Default `backend/kb` (CSV seed) |
 | `KB_FILE` | Default `articles.csv` |
+| `KB_DB_PATH` | Default `backend/data/support.db` |
 | `CLASSIFIER_CONFIDENCE_MIN` | Default `0.55` |
-| `KB_SIMILARITY_FLOOR` | Default `0.35` (TF-IDF / keyword retrieval gap floor) |
+| `KB_SIMILARITY_FLOOR` | Default `0.35` (FTS rank mapped to 0–1) |
+| `CHAT_TIMEOUT_SECONDS` | Default `180` (crew wall-clock) |
+| `TELEGRAM_ENABLED` | Default `false` |
+| `TELEGRAM_BOT_TOKEN` | Manager bot token (when enabled) |
+| `TELEGRAM_MANAGER_CHAT_ID` | Allow-listed chat id |
+| `HITL_TIMEOUT_SECONDS` | Default `300` |
 
 Chat endpoint is **open for demo**. Optional operator key applies to last-result polish only. **Do not** add per-agent model env vars (`OPENAI_MODEL_CLASSIFIER`, etc.) — tiers only (ADR-19).
 
@@ -563,7 +575,7 @@ Scale-out (replicas, shared session store, managed vector DB) is Future Work; MV
 | PII | Minimize raw messages in shared artifacts; redact keys from traces |
 | AI transparency | Disclosure banner (AC-01); `meta.ai_disclosure` (AC-01b); Art. 50-style |
 | Sentiment | Text-only; **no** biometric emotion (ADR-12) |
-| Tool least privilege | Only `kb_search` + `ticket_stub`; no MCP / shell / broad tools |
+| Tool least privilege | `kb_search`, `ticket_stub`, stub `account_lookup` / `order_lookup`; no MCP / shell |
 | Grounding / hallucination | Citations required on resolve; gap → refuse/escalate |
 | Compliance | GDPR retention / DPIA = Open Questions; `@security.eng` before Deliver when required |
 
@@ -607,8 +619,8 @@ Runtime checks: YAML loads; four step summaries; Prompt Trace for `trace_id`; es
 |------------|--------|
 | Runtime locked to **`crewai`** (YAML agents/tasks) | PRD; `AAMAD_TARGET_RUNTIME` unset → default |
 | **≤ 4** specialized agents; sentiment merged into escalation | SAD template / course complexity |
-| **No database**; no live third-party ticketing/CRM | Backend persona / PRD §10 |
-| **Non-streaming** JSON API | PRD course constraint |
+| **No conversation-history DB**; no live third-party ticketing/CRM. Local SQLite demo store allowed (ADR-20/21) | Backend persona / PRD §10 (superseded in part by ADR-20) |
+| JSON `POST /api/chat` plus SSE progress `POST /api/chat/stream` | Integration (ADR-05 original non-streaming; SSE added for long Ollama runs) |
 | Fixed delivery window **2026-08-01 → 2026-09-12** (Week 2 current) | Operator / PRD §8 |
 | English-first seed KB; chat channel only | PRD assumptions |
 | Secrets via environment variables only | AAMAD core / security |
@@ -622,20 +634,20 @@ Runtime checks: YAML loads; four step summaries; Prompt Trace for `trace_id`; es
 | ADR-02 | **4 agents**; sentiment **inside** `escalation_manager` | Stay within 3–4 agent cap; PRD merge |
 | ADR-03 | Frontend = **Next.js App Router + Tailwind + TypeScript** | FE persona defaults; PRD §6 |
 | ADR-04 | Backend HTTP = **FastAPI** (Python) | Thin async JSON beside CrewAI |
-| ADR-05 | Transport = **non-streaming JSON** | Course constraint; FE stage labels only |
-| ADR-06 | **No database** | Backend prohibition; opaque optional `session_id` |
+| ADR-05 | Transport = **non-streaming JSON** as the original course contract; **SSE progress** is the live UI transport (not LLM tokens) | Long Ollama runs exceeded proxy timeouts |
+| ADR-06 | **No conversation-history database**; optional opaque `session_id` | Original backend prohibition; ADR-20 adds a local demo SQLite file only |
 | ADR-07 | Repo layout = `frontend/` + `backend/` | PRD §10.2; clear epic ownership |
 | ADR-08 | LLM access via **model tiers** (not one global model for all agents) — see ADR-19 | Cost vs quality; closes PRD OQ #1 for Build |
-| ADR-09 | KB = **local CSV** `backend/kb/articles.csv` (≥10 FAQ rows) | No external vector SaaS in MVP |
+| ADR-09 | KB **authoring** = local CSV `backend/kb/articles.csv` (≥10 FAQ rows) | No external vector SaaS; live index is SQLite (ADR-20) |
 | ADR-10 | Process = **sequential**; no delegation; no memory | Determinism; adapter baseline |
 | ADR-11 | Fail-open to human on LLM/KB/timeout | PRD reliability; MRD degrade-to-human |
 | ADR-12 | Text-only sentiment; no biometric emotion | MRD/PRD compliance; EU AI Act risk posture |
-| ADR-13 | KB retrieval = **TF-IDF / bag-of-words cosine** (no embedding hard-dep for MVP); floor **0.35**; seed FAQs as rows in `backend/kb/articles.csv` | Close prior OQ #3; demo-stable Week 3; optional embedding later without topology change |
+| ADR-13 | Original live retrieval = **TF-IDF / bag-of-words** over CSV; floor **0.35** | Closed OQ #3 for Week 3; **superseded for live retrieval by ADR-20** |
 | ADR-14 | Operator strip from **last ChatResponse UI state**; `/api/last-result` optional polish | Close prior OQ #2; single Integration path for MVP |
-| ADR-15 | StatusLine = **optimistic local stage animation** until non-streaming JSON returns; FE abort **50–60s** | No streaming protocol in MVP; first stage label &lt;10s of send |
-| ADR-16 | Refuse/gap → final **`decision=escalate`** only (never resolve-only refuse); Path B locked | AC-03 groundedness + packet for humans |
+| ADR-15 | StatusLine = optimistic labels until first SSE `stage`; FE abort **~500s** (HITL) | SSE progress is live transport; local timer is fallback only |
+| ADR-16 | Gap/refuse originally forced **escalate**; MVP **guardrails** may resolve greetings, low-urgency calm gaps, and out-of-scope without a specialist pitch | AC-03 still forbids fabricated policy |
 | ADR-17 | Sentiment gate: escalate on **`risk=high`**, or **`sentiment=negative` plus** (medium/high risk, request_human, gap, refused, or low confidence) — not negative alone | Protect Path A from mild frustration false escalations |
-| ADR-18 | Wall-clock **45s** wins over per-task caps; partial `steps[]` + minimal failure packet; HTTP **200 + error** for post-kickoff failures; full chain even when `request_human=true` | Deterministic failure UX; packet quality for Path C |
+| ADR-18 | Original JSON soft timeout **45s**; live crew timeout is **`CHAT_TIMEOUT_SECONDS` (180)**; HITL wait **300s**; HTTP **200 + error** envelopes; full chain when `request_human=true` | Ollama Cloud runs exceed 45s |
 | ADR-19 | **Two tiers only:** `low` → `OPENAI_MODEL_LOW` (default `gpt-4.1-nano`) for classifier + retriever + escalation; `mid` → `OPENAI_MODEL_MID` (default `gpt-4.1-mini`) for `response_specialist`; `OPENAI_MODEL` fallback; no per-agent model envs; no `high` tier in MVP | Price-efficient: spend mid only on customer-facing prose |
 | ADR-20 | Live KB retrieval = **SQLite FTS5** in `support.db`; CSV remains canonical seed/export | Small-footprint DB without a server; same `RetrieverOutput` contract |
 | ADR-21 | Policy-action HITL = application-level approval queue + **Telegram** manager bot (not CrewAI `human_input`) | External manager approval; customer sync-wait on web chat |
@@ -728,8 +740,8 @@ POST /api/chat
 - User stories directory not present; AC IDs in PRD are authoritative for QA.  
 - `OPENAI_API_KEY` (or compatible provider configured for CrewAI) available at runtime.  
 - Folder names `frontend/` and `backend/` acceptable unless instructor mandates otherwise (PRD OQ #4).  
-- MVP retrieval = **TF-IDF / bag-of-words** per ADR-13; embedding optional post-slice; managed vector SaaS deferred.  
-- Seed KB = hand-authored B-Mobile CSV (`articles.csv`, one FAQ per row); not auto-generated; demo queries A/B/C locked in §2.  
+- Live retrieval = **SQLite FTS5** (ADR-20); CSV is the seed/export; ADR-13 TF-IDF is historical.  
+- Seed KB = hand-authored B-Mobile CSV (`articles.csv`, one FAQ per row); demo queries A/B/C + HITL credit/ETF.  
 - `sentiment` enum = `positive|neutral|negative`; `risk` / `urgency` enums = `low|medium|high`; escalate per ADR-17 (not negative-alone).  
 - `ChatResponse.packet` / `stub_ticket_id` required on escalate (including Path B refuse path and preferred on AC-06b failures); `null` on resolve.  
 - `refused` / `gap` never produce `decision=resolve` (ADR-16).  
@@ -740,7 +752,7 @@ POST /api/chat
 - Example config `security.require_security_assessment: true` → recommend `@security.eng` before Deliver even if course grading is TBD.  
 - MRD “learns and adapts” = offline KB/prompt updates post-MVP, not online fine-tuning (aligned with PRD).  
 - Operator grading uses last `ChatResponse` in UI (ADR-14); `/api/last-result` is not an MVP Integration exit criterion.  
-- StatusLine is local optimistic animation only until JSON returns (ADR-15); FE abort 50–60s.  
+- StatusLine uses SSE `stage` events when present; local animation is fallback (ADR-15). Client abort ~500s for HITL.  
 - PRD §10.3 schema must match this SAD; where they diverge, **SAD §2 is authoritative** for Build until PRD is synced.  
 - CORS includes both `localhost:3000` and `127.0.0.1:3000`.  
 - Concurrent demo target is best-effort on a single process; serial kickoff is acceptable.  
@@ -750,7 +762,7 @@ POST /api/chat
 
 1. Confirm instructor monorepo naming if not `frontend/` + `backend/`.  
 2. ~~`/api/last-result` vs UI state~~ — **Resolved (ADR-14):** UI state from last `ChatResponse`; last-result optional polish.  
-3. ~~KB retrieval algorithm / similarity floor~~ — **Resolved (ADR-13):** TF-IDF / bag-of-words cosine for MVP; floor `0.35`; seed contract + demo queries locked.  
+3. ~~KB retrieval algorithm / similarity floor~~ — **Resolved (ADR-13 then ADR-20):** floor `0.35` remains; live retrieval is SQLite FTS5; CSV is seed/export.  
 4. Security assessment graded vs optional for this course (PRD OQ #5); until answered, treat as recommended gate.  
 5. Public hosting target for Week 6 (local-only vs single cloud VM).  
 6. Disclosure UX: acknowledge-to-dismiss vs always-persistent banner — either OK; FE documents choice in `frontend.md`.  
@@ -814,5 +826,15 @@ POST /api/chat
 | Timestamp | 2026-08-15T17:30:00-05:00 |
 | Persona id | system-arch |
 | Action | update-sad (FE tree: ChatWindow + SpecialistStrip; chat layout; Start new conversation) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Prompt Trace | Omitted |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-28T23:45:00-05:00 |
+| Persona id | system-arch |
+| Action | sync-docs (as-built ADR-20 FTS5, ADR-21 Telegram HITL, SSE, ChatResponse.pending_approval) |
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai |
 | Prompt Trace | Omitted |

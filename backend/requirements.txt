@@ -11,7 +11,7 @@ uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 sse-starlette>=1.8.0
 
-# ML/NLP for KB Search (TF-IDF)
+# Knowledge retrieval uses SQLite FTS5 (stdlib). scikit-learn is unused leftover from ADR-13.
 scikit-learn>=1.3.0
 numpy>=1.24.0
 

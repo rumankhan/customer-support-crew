@@ -1,19 +1,24 @@
 # How to Run the Multi-Agent Support Application
 
+Canonical overview of the product: [`README.md`](README.md).
+
+Run both commands from the **repository root** (the folder that contains `backend/` and `frontend/`). Do not `cd backend` before uvicorn — the module path is `backend.main`.
+
 ## Quick Start
 
 ### Terminal 1: Backend (FastAPI + CrewAI)
 ```bash
-cd backend
 python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 **Expected output:**
 ```
+Initialising SQLite support database...
 Initializing Customer Support Crew...
 Crew initialized:
   Provider: ollama
   Model: gemma4:31b
+Telegram manager bot: disabled (set TELEGRAM_ENABLED=true to activate)
 INFO: Application startup complete.
 ```
 
@@ -39,10 +44,16 @@ npm run dev
 
 ---
 
-## Current Status
+## Expected local ports
 
-✅ **Backend:** Running on port 8001  
-✅ **Frontend:** Running on port 3000  
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:3000 |
+| Backend | http://127.0.0.1:8001 |
+| Health | http://127.0.0.1:8001/health |
+| Operator projector (read-only) | http://localhost:3000/operator |
+
+If port 8000 is free you may use it, but this repo’s working demo uses **8001**. Set `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001` in `frontend/.env.local` and restart `npm run dev`.
 
 ## Access the Application
 
@@ -59,9 +70,13 @@ Open your browser and go to: **http://localhost:3000**
 
 | Endpoint | Transport | Used by |
 |----------|-----------|---------|
-| `POST /api/chat/stream` | **SSE** (primary) | Browser chat — stage events + final `ChatResponse` |
-| `POST /api/chat` | JSON (legacy) | Scripts, tests (`test_ollama_backend.py`) |
+| `POST /api/chat/stream` | **SSE** (primary) | Browser chat — stage events, HITL wait, final `ChatResponse` |
+| `POST /api/chat` | JSON (legacy) | Scripts, tests (`test_ollama_backend.py`) — does **not** wait for Telegram |
 | `GET /health` | JSON | Liveness probe |
+| `GET /api/approvals/pending` | JSON | Operator projector + Telegram `/pending` |
+| `GET /api/approvals/history` | JSON | Recent decided requests |
+| `GET /api/approvals/{id}/status` | JSON | Client poll fallback; includes `customer_reply` |
+| `POST /api/approvals/{id}/decide` | JSON | Approve/Deny (Telegram bot uses this internally) |
 
 The UI calls **`/api/chat/stream`** via a Next.js streaming proxy at `frontend/app/api/chat/stream/route.ts` (avoids rewrite buffering).
 
@@ -113,12 +128,16 @@ python -m backend.scripts.telegram_get_chat_id
 |------------------|--------------|
 | `Apply a $25 credit to ACC-1001 for the outage last week` | Tap **Approve** |
 | `Cancel my plan and waive the $150 ETF on ACC-2002` | Tap **Deny**, then send a reason or `/skip` |
+| `credit for outage` | Same HITL path; **lookup #** 1–100 assigned (`REF-{n}`, proposed `$n`) |
+| `can you waive my fee` | Same HITL path with lookup # |
+
+After **Deny**, the bot asks for a reason. Type the reason, or `/skip` for contract boilerplate only. If a reason is sent, the customer sees `Request #N was not approved. Reason: {note}` — not extra ETF boilerplate.
 
 Telegram commands: `/pending`, `/history`, `/detail APR-xxxxxxxx`
 
-Read-only projector queue: [http://localhost:3000/operator](http://localhost:3000/operator)
+Read-only projector queue: [http://localhost:3000/operator](http://localhost:3000/operator) — no Approve/Deny buttons on the customer page.
 
-If Telegram is disabled, HITL requests resolve immediately with a “manager unavailable” message.
+If `TELEGRAM_ENABLED=false`, HITL requests resolve immediately with a “manager unavailable” message (no 300s hang).
 
 ---
 
@@ -128,17 +147,29 @@ If Telegram is disabled, HITL requests resolve immediately with a “manager una
 All configuration is in **`.env`** at the project root:
 
 ```bash
-# LLM Provider (using free Ollama Cloud model)
+# LLM Provider (Ollama Cloud or openai)
 LLM_PROVIDER=ollama
 OLLAMA_API_KEY=your-api-key-here
 OLLAMA_MODEL=gemma4:31b
 
-# Frontend API connection
+# Frontend → backend (also copy into frontend/.env.local)
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001
 
-# Crew wall-clock timeout (seconds) — applies to SSE stream and POST /api/chat
+# Crew wall-clock timeout (seconds) — SSE stream and POST /api/chat
 CHAT_TIMEOUT_SECONDS=180
+
+# SQLite KB + stubs + approval queue (created on backend start)
+KB_DB_PATH=backend/data/support.db
+KB_SIMILARITY_FLOOR=0.35
+
+# Telegram HITL (see section above)
+TELEGRAM_ENABLED=false
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_MANAGER_CHAT_ID=
+HITL_TIMEOUT_SECONDS=300
 ```
+
+The browser aborts the SSE request at **~500s** so a 300s HITL wait plus crew time can finish. Restart the backend after changing Telegram env vars.
 
 ---
 
@@ -198,8 +229,19 @@ Full technical detail: [`project-context/2.build/backend.md`](project-context/2.
 
 ### "system_error" in responses?
 - Verify `.env` file exists at project root
-- Check `OLLAMA_MODEL=gemma4:31b` (must match an model available on your Ollama account)
+- Check `OLLAMA_MODEL=gemma4:31b` (must match a model available on your Ollama account)
 - Check backend logs for specific errors
+
+### Telegram never pings the manager?
+- `TELEGRAM_ENABLED=true` and restart the backend (lifespan starts polling)
+- Confirm `TELEGRAM_BOT_TOKEN` and `TELEGRAM_MANAGER_CHAT_ID` (group IDs are often **negative**)
+- Run `python -m backend.scripts.telegram_get_chat_id` after messaging the bot
+- Customer chat uses **SSE** (`/api/chat/stream`). Legacy `POST /api/chat` does not wait for Telegram
+
+### HITL hangs for five minutes?
+- Manager must tap Approve/Deny. On Deny, send a reason or `/skip`
+- If Telegram is off, requests should not hang — they resolve as manager unavailable
+- Browser abort is ~500s; backend wait is `HITL_TIMEOUT_SECONDS` (default 300)
 
 ---
 

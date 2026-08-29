@@ -19,6 +19,17 @@
 
 **Define stage verdict: COMPLETE** — hand off to `@system.arch` (`*create-sad --mvp`) if `sad.md` is not finished.
 
+### As-built notes (2026-08-28)
+
+Original MVP freeze was CSV TF-IDF, no database, non-streaming JSON. The running app now also includes:
+
+- Live retrieval: **SQLite FTS5** (`backend/data/support.db`); CSV remains the seed/export (SAD **ADR-20**).
+- Policy-action **HITL** via Telegram (SAD **ADR-21**); `ChatResponse.decision` may be `pending_approval`.
+- Primary UI transport: **SSE** `POST /api/chat/stream` (not LLM token streaming).
+- Local demo API port: **8001**.
+
+These extensions do not add live CRM, conversation-history DB, or Approve/Deny on the customer page. Specs: `project-context/1.define/sfs/`.
+
 ### MRD → PRD alignment
 
 | MRD finding | PRD decision |
@@ -120,7 +131,7 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 - role: "Knowledge Base Research Specialist"  
 - goal: "Retrieve grounded passages with citations for the classified intent"  
 - tools: [`kb_search`]  
-- runtime notes: local/seed KB only — **`backend/kb/articles.csv`** (one B-Mobile FAQ per row: `id`, `title`, `body`); **TF-IDF / bag-of-words** (SAD ADR-13); floor `KB_SIMILARITY_FLOOR=0.35`; `output_pydantic: RetrieverOutput` — `{passages[], citations[], gap: bool}`
+- runtime notes: local/seed KB — **`backend/kb/articles.csv`** (authoring) loaded into **SQLite FTS5** (`KB_DB_PATH`, SAD ADR-20); floor `KB_SIMILARITY_FLOOR=0.35`; `output_pydantic: RetrieverOutput` — `{passages[], citations[], gap: bool}`
 
 **agent: response_specialist**  
 - role: "Customer Response Composer"  
@@ -148,7 +159,7 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 | CRM write actions | Out | P1+ |
 | Auth | Demo-safe: open chat; optional `OPERATOR_API_KEY` only if last-result polish is enabled | SSO/IAM |
 | LLM provider | Via env (`LLM_PROVIDER`: `openai` with `OPENAI_API_KEY`, or `ollama` with `OLLAMA_API_KEY`) | Multi-provider router |
-| Database | **None** (backend persona forbids persistence) | Optional store later |
+| Database | **None** for conversation history. Local SQLite demo store (`support.db`) holds FAQ FTS5, stub accounts/orders, HITL rows (ADR-20/21) | Optional conversation store later |
 
 **Performance targets (MVP)**: p95 automated response path < 30s end-to-end excluding human; support ≥ 5 concurrent demo sessions (course demo scale; 10 aspirational).
 
@@ -411,7 +422,7 @@ Sufficient detail for each of the six Build-stage epics. Personas must not inven
 **Must implement**
 - `config/agents.yaml` + `config/tasks.yaml` for the 4 agents / 4 tasks with named `output_pydantic` models: `ClassifierOutput`, `RetrieverOutput`, `ResponseOutput`, `EscalationOutput` (+ nested `EscalationPacket`) per SAD §2  
 - `crew.py` (or equiv.) sequential process; `memory=False`; `max_iter≤12`; bind agent LLMs via **SAD ADR-19 tiers** (`low`×3, `mid` for `response_specialist`) — not four separate model envs  
-- Tool `kb_search` over local seed KB (`backend/kb/articles.csv`, ≥10 FAQ rows covering demo A/B): **TF-IDF / bag-of-words** cosine per SAD ADR-13; floor `KB_SIMILARITY_FLOOR=0.35`; tool `ticket_stub` no-op/in-memory  
+- Tool `kb_search` over local seed KB (CSV ≥10 FAQ rows covering demo A/B, live index SQLite FTS5 per SAD ADR-20); floor `KB_SIMILARITY_FLOOR=0.35`; tool `ticket_stub` no-op/in-memory; HITL tools `account_lookup` / `order_lookup`  
 - HTTP API (schemas authoritative in **SAD §2**; keep paths stable):
 
 **`POST /api/chat`**
@@ -453,7 +464,7 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 - Prompt Trace persisted under `LOG_DIR` / `project-context/2.build/logs` (redact secrets; min fields per SAD §2)  
 - Soft timeout **45s**; FE client abort **50–60s**; CORS allow `localhost:3000` and `127.0.0.1:3000`  
 - `GET /api/last-result` optional polish only — **not** required for Backend or Integration exit  
-- **Prohibited:** database, Zendesk/CRM live APIs, analytics products, non-MVP agents  
+- **Prohibited:** live Zendesk/CRM APIs, analytics products, non-MVP agents. Local SQLite demo store is allowed (ADR-20/21). Conversation-history DB remains out.  
 
 **Exit:** documented in `backend.md`; offline kickoff + API smokeable with curl; Sprint 1 vertical slice returns resolve/escalate JSON for paths A/B/C
 
@@ -539,10 +550,10 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 - **Runtime locked to `crewai`** for this course delivery unless operator overrides before Backend Week 2 ends.
 - English-only seed KB; ≥10 FAQ **rows** in `backend/kb/articles.csv` covering demo paths A/B for **B-Mobile** (PIN, billing, shipping, returns, plan, email, plus roaming/eSIM/etc.).
 - Sentiment is text-only inside `escalation_manager` (4-agent cap).
-- **Non-streaming JSON** API for MVP; StatusLine uses **optimistic local stage animation**; streaming UI is a visible stub only.
-- Retrieval provisional default: **TF-IDF / bag-of-words**; `KB_SIMILARITY_FLOOR=0.35` (SAD ADR-13); tune without topology change.
+- Primary chat transport is **SSE progress**; JSON `POST /api/chat` remains for scripts (original non-streaming contract is legacy).
+- Retrieval: **SQLite FTS5** live (ADR-20); `KB_SIMILARITY_FLOOR=0.35`; CSV authoring unchanged. ADR-13 TF-IDF is historical.
 - Operator strip fed from **last ChatResponse UI state** (SAD ADR-14); `/api/last-result` optional polish.
-- **No database** in Backend epic.
+- **No conversation-history database.** Local `support.db` is the HITL/KB demo store only.
 - Clarifying multi-turn and CSAT dashboard are **P1 / not required** for Sep 12 demo.
 - Operator strip is **in-app**, not a separate console product.
 - Sprint 1 success = vertical slice chat → ChatResponse → reply + Talk-to-human before full UI polish.
@@ -603,3 +614,11 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 | Timestamp | 2026-08-15T17:30:00-05:00 |
 | Persona id | product-mgr |
 | Action | update-prd (§6 / §10.4 chat window, Get help, Start new conversation, specialist strip) |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-28T23:45:00-05:00 |
+| Persona id | product-mgr |
+| Action | sync-docs (as-built SQLite FTS5, Telegram HITL, SSE; original freeze retained above) |

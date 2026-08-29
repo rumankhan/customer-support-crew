@@ -36,8 +36,10 @@ OLLAMA_MODEL=gemma4:31b
 
 ### 3. Start the Backend
 
+From the **repo root**:
+
 ```bash
-python -m backend.main
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 ### 4. Verify Configuration
@@ -217,9 +219,9 @@ To migrate from OpenAI to Ollama Cloud:
    OLLAMA_MODEL=gemma4:31b
    ```
 
-3. **Restart backend:**
+3. **Restart backend** (repo root):
    ```bash
-   python -m backend.main
+   python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
    ```
 
 4. **Test thoroughly:** Verify all agent responses meet quality standards

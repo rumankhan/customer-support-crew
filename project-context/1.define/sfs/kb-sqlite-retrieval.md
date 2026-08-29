@@ -3,7 +3,7 @@
 **Feature ID:** SFS-KB-002  
 **Status:** Implemented (MVP)  
 **PRD anchor:** AC-03 — Grounded answers with refusal  
-**SAD anchor:** ADR-13 — KB retrieval with similarity floor; updated to SQLite+FTS5
+**SAD anchor:** ADR-20 — SQLite FTS5 live retrieval; ADR-13 floor 0.35 retained
 
 ---
 
@@ -160,3 +160,9 @@ Old vars (`KB_DIR`, `KB_FILE`) remain for backwards compat but are superseded by
 - Action: create-sfs (KB SQLite FTS5 retrieval)
 - Timestamp: 2026-08-28
 - Runtime: crewai (kb_search tool refactored in-place; RetrieverOutput contract unchanged)
+
+### Audit (append)
+- Persona: @backend.eng
+- Action: sync-docs
+- Timestamp: 2026-08-28T23:45:00-05:00
+- Notes: Live tool is FTS5; sklearn leftover in requirements.txt unused

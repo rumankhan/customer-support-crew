@@ -2,8 +2,10 @@
 
 **Persona**: `@qa.eng`  
 **Resolved runtime**: `crewai` (`AAMAD_TARGET_RUNTIME=crewai` in `.env`)  
-**Latest status**: **PASS** — SSE progress stream (2026-08-27); live integration retest 2026-08-26 after port/model fixes  
+**Latest status**: **PASS** — live integration (2026-08-26/27) plus SQLite FTS5 KB and Telegram HITL (2026-08-28). Docs synced 2026-08-28.  
 **Prior status**: **FAIL — live integration blocked** (2026-08-26T13:05-05:00); **PASS with scoped gaps** — frontend mock smoke 2026-08-15 (see §Historical below)
+
+HITL and FTS5 were not in the 2026-08-26 browser retest. Demo script: [`RUNNING.md`](../../RUNNING.md). Validator: `python -m backend.scripts.validate_kb_hitl`.
 
 ---
 
@@ -460,3 +462,12 @@ Runtime checks deferred: YAML load, Prompt Trace file for `trace_id`, real `tick
 | Result | **PASS** Path A PIN query via API, proxy, and browser (isolated) |
 | Test query | `how do I reset pin` |
 | Open | DEF-INT-09 concurrent-request proxy reset; DEF-INT-04…08 from prior run partially addressed |
+
+### Audit (append — docs sync)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-28T23:45:00-05:00 |
+| Persona id | qa-eng |
+| Action | sync-docs |
+| Result | Status line updated: FTS5 + Telegram HITL implemented; not re-run in this pass. Use RUNNING.md demo script. |

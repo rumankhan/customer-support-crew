@@ -4,7 +4,7 @@
 **Epic**: Integration  
 **Inputs**: `prd.md`, `sad.md`, `frontend.md`, `backend.md`  
 **Output**: Live `POST /api/chat` from Next.js → FastAPI; error envelopes; documented in this artifact  
-**Status**: ✅ Complete (SSE progress stream added 2026-08-27)  
+**Status**: ✅ Complete (SSE 2026-08-27; HITL Telegram wait 2026-08-28)  
 **Runtime**: `crewai` (locked per PRD; `AAMAD_TARGET_RUNTIME` unset → default)
 
 ---
@@ -42,7 +42,15 @@ Long crew runs (30s–3min on Ollama Cloud) caused Next.js rewrite proxy `ECONNR
 
 **Legacy:** `POST /api/chat` JSON remains for scripts/tests.
 
-**Env:** `CHAT_TIMEOUT_SECONDS=180` (backend + client abort 185s).
+**Env:** `CHAT_TIMEOUT_SECONDS=180` (crew). HITL wait `HITL_TIMEOUT_SECONDS=300`. Browser abort ~500s.
+
+---
+
+## 1.1.1 HITL approvals (2026-08-28)
+
+Policy actions pause the SSE stream (`approval_required` → wait → `approval_decided` | `approval_timeout`). Manager UI is **Telegram**, not the customer page. Next.js proxies `/api/approvals/*`. Read-only queue: `http://localhost:3000/operator`.
+
+Local demo backend port is **8001** (`NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001`). Commands: [`RUNNING.md`](../../RUNNING.md).
 
 ---
 
@@ -155,7 +163,7 @@ const nextConfig: NextConfig = {
 
 **Why rewrites:**
 - Browser calls `/api/chat` (same origin as frontend)
-- Next.js server proxies request to `http://127.0.0.1:8000/api/chat`
+- Next.js server proxies request to `http://127.0.0.1:8001/api/chat` (when `NEXT_PUBLIC_API_BASE_URL` is set; `next.config.ts` fallback is `:8000` if unset)
 - No CORS preflight required
 - Avoids browser private-network restrictions in some embedded browsers
 
@@ -171,7 +179,7 @@ const nextConfig: NextConfig = {
 # Frontend → FastAPI base URL (no trailing slash).
 # Next.js inlines NEXT_PUBLIC_* at dev/build time. Restart `npm run dev` after changes.
 # Use 127.0.0.1 (not localhost) to avoid IPv6 resolution issues on some Windows systems.
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001
 ```
 
 **Note:** `NEXT_PUBLIC_*` variables are inlined at build/dev-start time. Requires Next.js restart after changes.
@@ -239,7 +247,7 @@ curl http://localhost:3000/health
 
 ### 3.3 End-to-End Smoke Test
 
-1. Start backend: `cd backend && python -m uvicorn backend.main:app --reload --port 8000`
+1. Start backend: `python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001`
 2. Start frontend: `cd frontend && npm run dev`
 3. Navigate to `http://localhost:3000`
 4. Acknowledge disclosure
@@ -310,7 +318,7 @@ This is normal behavior when:
 **Implemented:** SSE **orchestration progress** — not LLM token streaming.
 
 - Endpoint: `POST /api/chat/stream`
-- Events: `started`, `stage`, `heartbeat`, `complete` | `error`
+- Events: `started`, `stage`, `heartbeat`, `approval_required`, `approval_decided`, `approval_timeout`, `complete` | `error`
 - Final payload: full SAD `ChatResponse` JSON in `complete` / `error`
 - UX: StatusLine driven by real agent ids (`query_classifier` → … → `escalation_manager`)
 - Dependency: `sse-starlette>=1.8.0`
@@ -325,7 +333,7 @@ This is normal behavior when:
 
 **Frontend** (`.env.local`):
 ```bash
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001
 ```
 
 **Backend** (loaded from shell or `.env`):
@@ -341,8 +349,7 @@ LOG_DIR=project-context/2.build/logs
 
 1. **Backend:**
    ```bash
-   cd backend
-   python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+   python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
    ```
 
 2. **Frontend** (separate terminal):
@@ -399,15 +406,15 @@ Backend CORS middleware is configured but not actively used:
 │  │ Next.js Server (port 3000)                         │    │
 │  │                                                      │    │
 │  │  • Rewrites config (next.config.ts)                │    │
-│  │    /api/chat → http://127.0.0.1:8000/api/chat      │    │
-│  │    /health → http://127.0.0.1:8000/health          │    │
+│  │    /api/chat → http://127.0.0.1:8001/api/chat      │    │
+│  │    /health → http://127.0.0.1:8001/health          │    │
 │  └──────────────────────┬───────────────────────────────┘    │
 └─────────────────────────┼───────────────────────────────────┘
                           │ HTTP POST (proxy)
                           │ IPv4 loopback
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ FastAPI Backend (port 8000)                                 │
+│ FastAPI Backend (port 8001)                                 │
 │                                                              │
 │  • POST /api/chat endpoint (main.py)                        │
 │  • RequestValidationError handler → ChatResponse envelope   │
@@ -443,13 +450,13 @@ Backend CORS middleware is configured but not actively used:
 6. **Session scope**: Session IDs are frontend-generated UUIDs, not validated or stored by backend in MVP
 7. **CORS**: Not required due to Next.js rewrites providing same-origin pattern
 8. **Error handling**: All API errors must return `ChatResponse` JSON format per SAD §2
-9. **Timeouts**: Client aborts at 95s, backend soft timeout 45s, Ollama hard timeout 90s
+9. **Timeouts**: Client abort ~500s (HITL); crew `CHAT_TIMEOUT_SECONDS=180`; backend HITL wait 300s
 
 ---
 
 ## Open Questions
 
-1. **Streaming**: PRD defers SSE/WebSocket to future work. When should streaming be prioritized?
+1. ~~**Streaming**~~ — **Resolved (2026-08-27):** SSE orchestration progress is primary; LLM token streaming still Future Work.
 2. **Session persistence**: Should session IDs be validated/stored backend-side for multi-turn conversations?
 3. **IPv6 support**: Should backend listen on both IPv4 and IPv6 for broader compatibility?
 4. **Rate limiting**: PRD excludes API rate limiting from MVP. When should this be added?
@@ -467,3 +474,11 @@ Backend CORS middleware is configured but not actively used:
 **Model**: Claude Sonnet 4.5 (via Cursor)  
 **Temperature**: 0.0 (deterministic artifact generation)  
 **Validation**: Integration tests pass; AC-01 through AC-06 verified; frontend→backend→CrewAI→response flow operational
+
+### Audit (append)
+
+**Persona**: `integration.eng`  
+**Action**: `sync-docs`  
+**Timestamp**: 2026-08-28T23:45:00-05:00  
+**Resolved Runtime**: `crewai`  
+**Notes**: Documented HITL SSE events, approval proxy, operator page, demo port 8001, 180s/300s/500s timeouts

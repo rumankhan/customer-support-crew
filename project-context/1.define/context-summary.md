@@ -50,7 +50,7 @@ Customer gets a **grounded chat answer** or a **clean human escalation with full
 - Health + structured failure path (`AC-06`)
 
 **Out (Future Work / P1)**
-- Live ticketing, voice, CRM writes, streaming, multi-turn clarifier, CSAT dashboard, DB, SSO, online learning, biometric emotion
+- Live ticketing, voice, real CRM writes, LLM token streaming, multi-turn clarifier, CSAT dashboard, conversation-history DB, SSO, online learning, biometric emotion
 
 ## Agent roster (for SAD) — max 4
 
@@ -63,42 +63,43 @@ Customer gets a **grounded chat answer** or a **clean human escalation with full
 
 - Text-only sentiment; Art. 50-style disclosure P0  
 - Secrets via env only; redact traces  
-- No database; no live third-party integrations in MVP  
-- Named task outputs (`ClassifierOutput`…`EscalationPacket`); retrieval floor `0.35` (SAD ADR-13)  
-- Operator strip from last `ChatResponse` UI state; StatusLine = optimistic local animation (no streaming)  
+- Conversation-history DB out; local SQLite `support.db` holds FTS5 KB + HITL (ADR-20/21)  
+- Named task outputs (`ClassifierOutput`…`EscalationPacket`); retrieval floor `0.35` (FTS5, ADR-20)  
+- Operator strip from last `ChatResponse` UI state; StatusLine from SSE `stage` events  
+- Policy actions wait on Telegram Approve/Deny (`pending_approval`)  
 - Sprint 1 = vertical slice before UI polish  
-- **Fixed 6-week delivery:** 2026-08-01 → 2026-09-12 (**Week 2 current**)
+- **Fixed 6-week delivery:** 2026-08-01 → 2026-09-12
 
 ## 6-Week timeline (six Build epics)
 
 | Week | Dates | Epic(s) | Status |
 |------|-------|---------|--------|
 | 1 | Aug 1–7 | Architecture + Setup | Assumed started/complete |
-| 2 | Aug 8–14 | Backend (crew + named schemas) | **Current** |
-| 3 | Aug 15–21 | Backend API + thin FE vertical slice | Upcoming |
-| 4 | Aug 22–28 | FE polish + Integration | Upcoming |
-| 5 | Aug 29–Sep 4 | QA (+ security recommended) | Upcoming |
+| 2 | Aug 8–14 | Backend (crew + named schemas) | Done |
+| 3 | Aug 15–21 | Backend API + thin FE vertical slice | Done |
+| 4 | Aug 22–28 | FE polish + Integration + HITL/FTS5 | Done (this week) |
+| 5 | Aug 29–Sep 4 | QA (+ security recommended) | In progress / remaining HITL AC |
 | 6 | Sep 5–12 | Deliver | Upcoming |
 
 ## Next recommended actions
 
-1. `@project.mgr` → `*setup-project` / `*configure-env` / `*document-setup`  
-2. `@backend.eng` → named `output_pydantic` models + crew YAML + kickoff + `POST /api/chat` vertical slice per SAD  
-3. Do not expand into P1 (live ticketing, streaming, DB); polish StatusLine/OperatorStrip after slice works
+1. Keep Telegram HITL enabled for demos (`RUNNING.md`)
+2. `@qa.eng` — exercise HITL credit/ETF paths if not already in qa.md
+3. `@devops.eng` — Deliver after QA/security gates (`deploy.md`)
 
 ## Sources
 
 - `project-context/1.define/mrd.md`
 - `project-context/1.define/prd.md` (§8–§10)
-- `project-context/1.define/sad.md` (ADR-13/14/15; Sprint 1 slice)
+- `project-context/1.define/sad.md` (ADR-20/21 as-built; ADR-13 historical)
 - AAMAD README Phase 2 epics; SAD template MVP agent cap
 - Operator: 6-week course alignment (2026-08-08); pre-Build sharpen (2026-08-12)
 
 ## Assumptions
 
-- Course MVP freezes: stub ticketing, no DB, crewai, non-streaming, 4 agents
-- Project clock started 2026-08-01
-- Retrieval hybrid + floor 0.35; AC-05 via UI state (SAD OQ #2–#3 closed)
+- Course MVP: stub ticketing, crewai, 4 agents; SSE progress + local SQLite demo store in scope  
+- Project clock started 2026-08-01  
+- Retrieval FTS5 + floor 0.35; HITL via Telegram; AC-05 via UI state
 
 ## Open Questions
 
@@ -115,3 +116,12 @@ Customer gets a **grounded chat answer** or a **clean human escalation with full
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai (locked) |
 | Prompt Trace | Omitted — handoff summary only; no secrets |
 | Change note | Synced Sprint 1 vertical slice, closed SAD OQs, StatusLine/operator/retrieval locks |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-28T23:45:00-05:00 |
+| Persona id | product-mgr |
+| Action | sync-docs (as-built FTS5 + Telegram HITL + SSE) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
