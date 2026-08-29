@@ -41,13 +41,13 @@ The Multi-Agent Customer Support Crew is a chat-first MVP that runs four special
 | `GET /health` | Ops / CI ↔ Backend | `{ "status": "ok" }` |
 | `GET /api/last-result` | Operator UI ↔ Backend (optional polish) | Last in-memory `ChatResponse`; **not** required for AC-05 |
 | CrewAI `kickoff` | FastAPI ↔ Runtime | Inputs `{message, request_human}`; sequential task outputs |
-| `kb_search` | Retriever ↔ `backend/kb/articles.csv` | Query → passages / gap (one row = one FAQ) |
+| `kb_search` | Retriever ↔ SQLite FTS5 (`support.db`, seeded from `articles.csv`) | Query → passages / gap |
 | `ticket_stub` | Escalation ↔ In-memory stub | Packet → `{ticket_id: "STUB-…"}` |
 | LLM provider API | CrewAI ↔ External | Completions via env-configured key/model |
 
 ```
 Browser (Next.js) ──POST /api/chat──► FastAPI ──kickoff──► CrewAI (4 agents)
-                                              │                 ├─ kb_search (articles.csv)
+                                              │                 ├─ kb_search (SQLite FTS5)
                                               │                 └─ ticket_stub
                                               ▼
                                     ChatResponse + Prompt Trace
@@ -87,13 +87,14 @@ Browser (Next.js) ──POST /api/chat──► FastAPI ──kickoff──► C
 | API client (`lib/api.ts`) | Mock in FE epic; live `fetch` to `/api/chat` in Integration | FE → Integration |
 | FastAPI gateway | Validate request; CORS; invoke crew; map response; health; optional last-result | Backend |
 | CrewAI runtime (`customer_support_crew`) | Sequential 4-agent pipeline from YAML | Backend |
-| `kb_search` | Local CSV retrieval over `backend/kb/articles.csv` (≥10 seed FAQ rows) | Backend |
+| `kb_search` | SQLite FTS5 over `backend/data/support.db` (seeded from `articles.csv`, ≥10 FAQ rows) | Backend |
+| Telegram manager bot | External HITL Approve/Deny for policy actions (`TELEGRAM_*` env) | Backend |
 | FE mock KB loader | **FE epic only:** `GET /api/kb` reads the same CSV for stub Path A/B. **Not** a product API; Integration replaces with `POST /api/chat` + crew `kb_search`. | Frontend (temporary) |
 | `ticket_stub` | In-memory stub ticket id for escalate path | Backend |
 | Prompt Trace store | `{LOG_DIR}/{trace_id}.json` (redact secrets/PII) | Backend |
 | LLM provider | Model completion via CrewAI / OpenAI SDK | External |
 
-**Data (MVP):** no persistent DB. Seed KB = `backend/kb/articles.csv` (one FAQ per row). Optional process-local `last_result` (lost on restart). `session_id` opaque/optional only.
+**Data (MVP + extension):** Seed FAQs remain authored in `backend/kb/articles.csv`. Live retrieval uses **SQLite FTS5** in `backend/data/support.db` (`kb_articles` + FTS index). The same file holds stub accounts/orders and HITL `approval_requests`. This is an MVP demo store — not the P2 persistent conversation-history database. Optional process-local `last_result` (lost on restart). `session_id` opaque/optional only.
 
 ### Frontend logical structure
 
@@ -636,6 +637,8 @@ Runtime checks: YAML loads; four step summaries; Prompt Trace for `trace_id`; es
 | ADR-17 | Sentiment gate: escalate on **`risk=high`**, or **`sentiment=negative` plus** (medium/high risk, request_human, gap, refused, or low confidence) — not negative alone | Protect Path A from mild frustration false escalations |
 | ADR-18 | Wall-clock **45s** wins over per-task caps; partial `steps[]` + minimal failure packet; HTTP **200 + error** for post-kickoff failures; full chain even when `request_human=true` | Deterministic failure UX; packet quality for Path C |
 | ADR-19 | **Two tiers only:** `low` → `OPENAI_MODEL_LOW` (default `gpt-4.1-nano`) for classifier + retriever + escalation; `mid` → `OPENAI_MODEL_MID` (default `gpt-4.1-mini`) for `response_specialist`; `OPENAI_MODEL` fallback; no per-agent model envs; no `high` tier in MVP | Price-efficient: spend mid only on customer-facing prose |
+| ADR-20 | Live KB retrieval = **SQLite FTS5** in `support.db`; CSV remains canonical seed/export | Small-footprint DB without a server; same `RetrieverOutput` contract |
+| ADR-21 | Policy-action HITL = application-level approval queue + **Telegram** manager bot (not CrewAI `human_input`) | External manager approval; customer sync-wait on web chat |
 
 ### Design principles
 

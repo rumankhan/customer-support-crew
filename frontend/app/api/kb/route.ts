@@ -2,7 +2,10 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
 
-/** Mock-only: expose the canonical seed CSV to the browser stub. Not the CrewAI API. */
+/**
+ * FE-epic mock loader only. Live chat uses POST {API}/api/chat; crew kb_search
+ * owns retrieval. Do not call this route for answers after Integration.
+ */
 export async function GET() {
   const filePath = path.join(process.cwd(), "..", "backend", "kb", "articles.csv");
   try {

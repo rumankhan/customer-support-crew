@@ -1,10 +1,16 @@
 # B-Mobile seed knowledge base
 
-Canonical corpus: **`articles.csv`** (one FAQ per row). English, fictional consumer carrier.
+Canonical export: **`articles.csv`** (one FAQ per row). English, fictional consumer carrier.
 
 Columns: `id`, `title`, `body`. Quote fields that contain commas.
 
-CrewAI `kb_search` (when the backend exists) should load this file. Until then the frontend stub reads it through mock `GET /api/kb` and `frontend/lib/kb.ts`.
+Live retrieval uses **SQLite FTS5** in `backend/data/support.db` (seeded from this CSV).
+
+```bash
+python -m backend.scripts.migrate_kb_csv_to_sqlite
+```
+
+The frontend mock `GET /api/kb` still serves this CSV for offline demos. Live chat uses crew `kb_search`.
 
 **Path A (hit):** `How do I reset my B-Mobile My Account PIN?`  
 **Path B (miss):** `What is your quantum warranty for the hardware drone?`  

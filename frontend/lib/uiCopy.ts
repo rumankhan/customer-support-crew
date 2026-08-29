@@ -23,8 +23,15 @@ export const UI = {
   escalateCta: "I'd rather talk to a person",
   escalateCtaHint: "Check the box below and send again so we route you to a specialist.",
   specialistNotes: "Notes for the specialist",
+  managerReview: "Pending manager approval (sent via Telegram)",
   comingLater: "Coming later",
 } as const;
+
+/** Customer-facing specialist handoff banner — never when tone is neutral. */
+export function shouldShowEscalateNotice(result: ChatResponse): boolean {
+  if (result.sentiment === "neutral") return false;
+  return result.decision === "escalate" || result.error !== null;
+}
 
 export const CREW_STATUS_LABEL = {
   idle: "Ready",
@@ -34,5 +41,7 @@ export const CREW_STATUS_LABEL = {
 } as const;
 
 export function outcomeLabel(decision: ChatResponse["decision"]): string {
-  return decision === "escalate" ? "Sent to a specialist" : "Answered";
+  if (decision === "escalate") return "Sent to a specialist";
+  if (decision === "pending_approval") return "Waiting on manager";
+  return "Answered";
 }

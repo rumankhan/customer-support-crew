@@ -39,6 +39,12 @@ export default function HomePage() {
           Ask about plans, billing, SIM, roaming, or a device order. Answers come
           from B-Mobile help articles, or we hand you to a specialist.
         </p>
+        <p className="mt-2 text-xs text-muted">
+          Projector view of manager queue:{" "}
+          <a className="text-accent underline" href="/operator">
+            /operator
+          </a>
+        </p>
       </header>
 
       <DisclosureBanner
@@ -50,7 +56,7 @@ export default function HomePage() {
         history={workflow.history}
         lastQuery={workflow.lastQuery}
         phase={workflow.phase}
-        stageLabel={workflow.stageLabel}
+        stageLabel={workflow.hitlPendingReply ?? workflow.stageLabel}
         query={query}
         requestHuman={requestHuman}
         crewStatus={workflow.crewStatus}

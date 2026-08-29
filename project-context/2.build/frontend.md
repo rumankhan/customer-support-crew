@@ -154,7 +154,7 @@ export type ChatResponse = {
 | I'd rather talk to a person | `request_human` | Path C when `true` |
 | I understand | `disclosure_acknowledged` | Optional; does not block send |
 | B-Mobile bubble | `reply`, `sources_used[]` | Sources on resolve |
-| Escalate notice + CTA | `decision === "escalate"` **or** `error != null` | CTA checks talk-to-person for next send |
+| Escalate notice + CTA | `shouldShowEscalateNotice(result)` — escalate/error **and** sentiment ≠ neutral | CTA checks talk-to-person for next send |
 | For specialists | `decision`, `reason_codes`, `steps[]`, `trace_id`, `packet`, `stub_ticket_id` | ADR-14 last result in UI state |
 
 **Short JSON example (resolve)**
@@ -277,7 +277,7 @@ Rendered on the same route. Customer-facing content lives in chat bubbles. The s
 
 | Region | Fields | Notes |
 |--------|--------|-------|
-| B-Mobile bubble | `reply`, `sources_used[]`, escalate notice | Sources on resolve; escalate copy when `decision=escalate` or `error != null` |
+| B-Mobile bubble | `reply`, `sources_used[]`, escalate notice | Sources on resolve; specialist banner only when `shouldShowEscalateNotice()` (not neutral sentiment) |
 | Pending bubble | Current stage label | **Only** while `phase === "running"` |
 | I'd rather talk to a person | Checkbox + error CTA | Sets `request_human` for the **next** send |
 | For specialists | `decision`, `reason_codes[]`, `steps[]`, `trace_id` | Opens `steps[]` when JSON lands |

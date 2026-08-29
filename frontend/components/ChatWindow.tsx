@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { InputsForm } from "@/components/InputsForm";
 import type { CrewStatus } from "@/lib/crewStatus";
-import { UI } from "@/lib/uiCopy";
+import { UI, shouldShowEscalateNotice } from "@/lib/uiCopy";
 import type { ChatResponse, HistoryEntry, RunPhase } from "@/lib/types";
 
 type Props = {
@@ -36,13 +36,13 @@ function AgentBubble({
       <div className="flex justify-start">
         <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-canvas px-3 py-2 text-sm text-muted">
           <p className="text-xs font-medium text-ink">B-Mobile</p>
-          <p className="mt-1">{pendingLabel}…</p>
+          <p className="mt-1">{pendingLabel}{pendingLabel.endsWith("…") || pendingLabel.endsWith("...") ? "" : "…"}</p>
         </div>
       </div>
     );
   }
   if (!result) return null;
-  const isEscalate = result.decision === "escalate" || result.error !== null;
+  const showEscalateNotice = shouldShowEscalateNotice(result);
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-canvas px-3 py-2 text-sm leading-6 text-ink">
@@ -62,7 +62,7 @@ function AgentBubble({
             </ul>
           </div>
         ) : null}
-        {isEscalate ? (
+        {showEscalateNotice ? (
           <p className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs">
             {UI.escalateNotice}
             {result.stub_ticket_id ? ` ${UI.reference}: ${result.stub_ticket_id}` : ""}

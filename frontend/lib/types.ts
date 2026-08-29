@@ -30,8 +30,22 @@ export type ChatError = {
   message: string;
 };
 
+export type ApprovalRequest = {
+  id: string;
+  action_kind: string;
+  subject_id: string;
+  amount: number | null;
+  reason: string;
+  status: "pending" | "approved" | "denied";
+  operator_note: string | null;
+  context: Record<string, unknown>;
+  created_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+};
+
 export type ChatResponse = {
-  decision: "resolve" | "escalate";
+  decision: "resolve" | "escalate" | "pending_approval";
   reply: string;
   sources_used: SourceRef[];
   sentiment: "positive" | "neutral" | "negative";
@@ -41,6 +55,7 @@ export type ChatResponse = {
   trace_id: string;
   packet: EscalationPacket | null;
   stub_ticket_id: string | null;
+  approval: ApprovalRequest | null;
   meta: {
     ai_disclosure: true;
     disclosure_acknowledged: boolean;

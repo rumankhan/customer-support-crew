@@ -1,0 +1,135 @@
+# Multi-Agent Customer Support Crew - Task Definitions
+# Aligned with SAD §2 Sequential Pipeline with Context Chaining
+
+classify_inquiry:
+  description: >
+    Analyze the customer message: {message}
+    
+    Extract and classify:
+    1. The customer's primary intent (what they want to accomplish)
+    2. Urgency level (low/medium/high) based on language and context
+    3. Key entities mentioned (account, plan, device, billing, etc.)
+    4. Your confidence in the classification (0.0 to 1.0)
+    
+    Scope — in scope: B-Mobile wireless/mobile service and customer account support
+    (plans, billing, devices, PIN, voicemail, account access, coverage, etc.).
+    If the question is clearly outside this scope (general knowledge, other companies,
+    unrelated hobbies, etc.), set intent to "out_of_scope".
+    
+    Consider context:
+    - request_human flag: {request_human}
+    
+    Be precise and analytical. Your classification guides the entire resolution process.
+  expected_output: >
+    A structured classification with intent, urgency, entities list, and confidence score.
+    Format: ClassifierOutput with fields intent, urgency, entities, confidence
+  agent: query_classifier
+  output_pydantic: ClassifierOutput
+
+retrieve_knowledge:
+  description: >
+    Using the classified intent from the previous step, search the B-Mobile knowledge base
+    for relevant help articles.
+    
+    Use the kb_search tool to find FAQ articles that address the customer's question.
+    
+    Requirements:
+    - Search for articles matching the intent and entities
+    - Return passages with similarity scores
+    - Include citations (title and snippet) for each relevant article
+    - Set gap=true if no articles meet the similarity threshold (0.35)
+    
+    IMPORTANT: Only return documented knowledge. Never fabricate articles or information.
+  expected_output: >
+    A structured retrieval result with passages, citations, and gap flag.
+    Format: RetrieverOutput with fields passages (list with title/snippet/score),
+    citations (list with title/snippet), gap (boolean)
+  agent: knowledge_retriever
+  output_pydantic: RetrieverOutput
+  context:
+    - classify_inquiry
+
+compose_response:
+  description: >
+    Draft a customer-facing response using ONLY the knowledge base articles from the previous step.
+    
+    Customer message: {message}
+    
+    Guidelines:
+    0. If classified intent is greeting, hello, small_talk, thanks, or farewell:
+       compose a brief friendly welcome or acknowledgment (refused=false).
+       No KB articles are required for pure greetings.
+    0b. If classified intent is out_of_scope (not B-Mobile mobile/account support):
+       politely explain you only help with B-Mobile service and account topics.
+       Set refused=true. Do NOT suggest speaking with a human agent or specialist.
+    1. If gap=true or no citations available, set refused=true and explain you don't have
+       that information in your knowledge base
+    2. If citations are available, compose a helpful, empathetic response that:
+       - Directly answers the customer's question
+       - Cites specific sources used
+       - Is written in a friendly, professional tone
+       - Stays within B-Mobile policy
+    3. Never invent or assume information not in the provided sources
+    4. Keep responses concise (2-4 paragraphs)
+    
+    If refused=true for an in-scope B-Mobile question, you may mention the customer can
+    ask another B-Mobile question. If refused because intent is out_of_scope, do NOT
+    recommend a human agent.
+  expected_output: >
+    A structured response with reply text, sources_used list, and refused flag.
+    Format: ResponseOutput with fields reply, sources_used (list of citations), refused (boolean)
+  agent: response_specialist
+  output_pydantic: ResponseOutput
+  context:
+    - classify_inquiry
+    - retrieve_knowledge
+
+triage_and_escalate:
+  description: >
+    Make the final decision: resolve or escalate this customer interaction.
+    
+    Inputs from previous steps:
+    - Classification: intent, urgency, confidence
+    - Retrieval: gap, citations
+    - Response: reply, refused
+    - Customer flags: request_human={request_human}
+    
+    Escalation Rules (apply ANY that match):
+    0. If intent is greeting, hello, small_talk, thanks, or farewell AND request_human=false
+       → RESOLVE (gap/refused rules do NOT apply to pure greetings)
+    0a. If intent is out_of_scope AND request_human=false → RESOLVE (no specialist handoff)
+    0b. If urgency=low AND sentiment is neutral or positive AND risk is low or medium
+       AND request_human=false → RESOLVE (gap/refused/low_confidence alone do NOT escalate)
+    1. If request_human=true → ESCALATE with reason_code 'request_human'
+    2. If gap=true or refused=true → ESCALATE with 'retrieval_gap' or 'refused'
+       (unless rule 0 or 0b applies)
+    3. If confidence < {classifier_confidence_min} → ESCALATE with 'low_confidence'
+    4. If risk=high → ESCALATE with 'high_risk_sentiment'
+    5. If sentiment=negative AND (risk=medium/high OR request_human OR gap OR refused OR low confidence)
+       → ESCALATE with 'high_risk_sentiment'
+    
+    Otherwise: RESOLVE
+    
+    Sentiment Analysis (text-only, no biometrics):
+    - Analyze the customer message for positive/neutral/negative tone
+    - Assess risk level (low/medium/high) based on language intensity, frustration indicators
+    
+    On ESCALATE:
+    - Create escalation packet with all context
+    - Use ticket_stub tool to generate stub ticket ID
+    - Set packet and stub_ticket_id fields
+    - Include all relevant reason_codes
+    
+    On RESOLVE:
+    - Set packet=null and stub_ticket_id=null
+    - Ensure sources_used is populated
+  expected_output: >
+    A structured escalation decision with decision, sentiment, risk, reason_codes, and optional packet.
+    Format: EscalationOutput with fields decision (resolve/escalate), sentiment, risk,
+    reason_codes (list), packet (EscalationPacket or null)
+  agent: escalation_manager
+  output_pydantic: EscalationOutput
+  context:
+    - classify_inquiry
+    - retrieve_knowledge
+    - compose_response

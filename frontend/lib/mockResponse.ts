@@ -29,6 +29,7 @@ export function mockResolveFromKb(input: RunInput, traceId: string): ChatRespons
     trace_id: traceId,
     packet: null,
     stub_ticket_id: null,
+    approval: null,
     meta: baseMeta(input),
     error: null,
   };
@@ -59,6 +60,7 @@ export function mockEscalateUnknownTopic(input: RunInput, traceId: string): Chat
       stub_ticket_id: stub,
     },
     stub_ticket_id: stub,
+    approval: null,
     meta: baseMeta(input),
     error: null,
   };
@@ -88,6 +90,7 @@ export function mockEscalateRequestHuman(input: RunInput, traceId: string): Chat
       stub_ticket_id: stub,
     },
     stub_ticket_id: stub,
+    approval: null,
     meta: baseMeta(input),
     error: null,
   };
@@ -117,6 +120,7 @@ export function mockTimeout(input: RunInput, traceId: string): ChatResponse {
       stub_ticket_id: stub,
     },
     stub_ticket_id: stub,
+    approval: null,
     meta: baseMeta(input),
     error: {
       code: "llm_or_timeout",

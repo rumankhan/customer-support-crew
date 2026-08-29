@@ -1,11 +1,175 @@
-# QA Report: Multi-Agent Customer Support Crew (Frontend, mock data)
+# QA Report: Multi-Agent Customer Support Crew
 
 **Persona**: `@qa.eng`  
-**Actions**: `*qa`, `*verify-flow` (UI + mocks only), `*log-defects`, `*future-work`  
-**Status**: **PASS with scoped gaps** — frontend smoke re-run **2026-08-15T17:27–17:28-05:00** after chat-window UI. Live crew / FastAPI not in this run.  
-**Resolved runtime**: `crewai` (default; `AAMAD_TARGET_RUNTIME` unset)  
-**Test date**: 2026-08-15 (initial) + crew-status retest 09:28 + CSV/KB retest 11:55–11:57-05:00 + **chat UI retest 17:27–17:28-05:00**  
-**Harness**: Cursor IDE browser against `http://localhost:3000/`; `npx tsc --noEmit` PASS (prior); `GET /api/kb` still the mock CSV loader
+**Resolved runtime**: `crewai` (`AAMAD_TARGET_RUNTIME=crewai` in `.env`)  
+**Latest status**: **PASS** — SSE progress stream (2026-08-27); live integration retest 2026-08-26 after port/model fixes  
+**Prior status**: **FAIL — live integration blocked** (2026-08-26T13:05-05:00); **PASS with scoped gaps** — frontend mock smoke 2026-08-15 (see §Historical below)
+
+---
+
+## Live integration retest — 2026-08-26 (after fixes)
+
+**Actions**: `*qa`, `*verify-flow`, `*test-integration`  
+**Fixes applied**: Backend moved to **port 8001**; `OLLAMA_MODEL=gemma4:31b`; frontend `.env.local` aligned; single uvicorn instance; `PYTHONIOENCODING=utf-8`.
+
+### Verdict
+
+**Integration PASS** for Path A PIN query (`how do I reset pin`).
+
+| ID | Check | Result | Evidence |
+|----|-------|--------|----------|
+| I-R01 | Direct `POST :8001/api/chat` | **PASS** | `decision: resolve`, 4 steps, 2 sources, grounded PIN reply (~19s) |
+| I-R02 | `POST :3000/api/chat` via rewrite | **PASS** | `decision: resolve`, 4 steps, 2 sources |
+| I-R03 | `GET :3000/health` via rewrite | **PASS** | `{"status":"ok"}` (B-Mobile backend) |
+| I-R04 | Browser E2E (isolated run) | **PASS** | Reply + “From our help articles” sources; specialist strip shows 4 agents |
+| I-R05 | Browser E2E under concurrent API load | **FAIL** | HTTP 500 / `ECONNRESET` when backend already running a crew kickoff |
+
+**Remaining gap:** Backend handles one synchronous crew at a time; concurrent requests can cause Next.js proxy `socket hang up` (HTTP 500 in UI). Not MVP-blocking for single-user demo; document for production.
+
+### Defects closed (SSE retest)
+
+| ID | Resolution |
+|----|------------|
+| DEF-INT-09 | **Mitigated** — SSE stream + heartbeat prevents proxy `ECONNRESET`; real stage events in UI |
+
+### Audit (SSE implementation)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-27T13:10:00-05:00 |
+| Persona id | qa-eng / integration.eng |
+| Action | Implement SSE progress stream + documentation |
+| Result | Primary chat path uses `POST /api/chat/stream`; legacy JSON retained |
+
+### Guardrails (2026-08-27)
+
+Product guardrails documented in [`RUNNING.md`](../../RUNNING.md#guardrails-2026-08-27), [`backend.md`](backend.md), [`integration.md`](integration.md).
+
+| ID | Guardrail | Verify |
+|----|-----------|--------|
+| GR-01 | Greeting → `decision=resolve`, no STUB | Send `hello` |
+| GR-02 | Low urgency + neutral → no specialist banner | Neutral reply; no amber handoff copy |
+| GR-03 | Out of scope → scope message, no “human agent” pitch | e.g. capital-of-France question |
+| GR-04 | `request_human=true` → still escalates | Path C unchanged |
+| GR-05 | SSE `complete` event parsed on stream close | No “stream ended before reply” synthetic error |
+
+**Note:** Path B smoke expectations updated — in-scope KB gap with calm tone resolves in-chat; escalate reserved for request_human / negative sentiment / hard errors.
+
+### Defects closed (port/model retest)
+
+| ID | Resolution |
+|----|------------|
+| DEF-INT-01 | **Closed** — backend on `:8001`, away from Docker/WSL `:8000` conflict |
+| DEF-INT-02 | **Closed** — `gemma4:31b` works on Ollama Cloud account |
+| DEF-INT-03 | **Closed** — frontend rewrite returns 200 + resolve |
+
+### New defect (superseded by SSE)
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| DEF-INT-09 | Low | ~~Concurrent chat + long JSON POST caused proxy reset~~ → **Mitigated** by SSE stream |
+
+---
+
+## Live integration QA — 2026-08-26
+
+**Actions**: `*qa`, `*verify-flow`, `*test-integration`, `*log-defects`  
+**Harness**: Direct API (`Invoke-RestMethod` / Python), Cursor IDE browser at `http://localhost:3000/`, crew kickoff script  
+**Test query**: `how do I reset pin` (Path A variant; canonical demo: “How do I reset my B-Mobile My Account PIN?”)
+
+### Scope
+
+| In this run | Out of this run |
+|-------------|-----------------|
+| `GET /health`, `POST /api/chat` direct + via Next.js rewrite | Load / concurrent sessions |
+| CrewAI `kickoff()` with Ollama Cloud | OpenAI provider path |
+| Browser E2E chat submit + error UI | Security assessment |
+| Port conflict diagnosis on `:8000` | Full Path B/C demo matrix |
+
+### Verdict
+
+**Integration FAIL.** Frontend UI and error envelopes work, but the chat pipeline cannot complete a grounded PIN answer:
+
+1. **Port 8000 is contested** — Docker (`com.docker.backend`), WSL (`wslrelay`), and **two** Python uvicorn processes all listen on `:8000`. Requests are routed non-deterministically.
+2. **Frontend rewrite often hits the wrong backend** — `GET http://localhost:3000/health` returns `{"status":"ok","service":"recruitment-assistant-api","runtime":"crewai"}` (not B-Mobile). `POST http://localhost:3000/api/chat` returns **HTTP 404**.
+3. **When B-Mobile backend is hit**, CrewAI fails on first agent — Ollama Cloud returns `model "llama3.2:3b" not found`. API responds with `decision: escalate`, `error.code: system_error`, **empty `steps[]`**.
+
+Demo Path A (resolve + sources for PIN reset) **did not pass**.
+
+---
+
+### Integration results
+
+| ID | Check | AC | Result | Evidence |
+|----|-------|-----|--------|----------|
+| I-L01 | Direct `GET http://127.0.0.1:8000/health` | AC-06a | **PASS** (intermittent) | `{"status":"ok"}` when B-Mobile uvicorn receives request |
+| I-L02 | Direct `POST http://127.0.0.1:8000/api/chat` PIN query | AC-02…05 | **FAIL** | HTTP 200 but `decision: escalate`, `error.code: system_error`, `steps: []`, stub ticket generated |
+| I-L03 | `POST http://127.0.0.1:3000/api/chat` via rewrite | AC-02…05 | **FAIL** | HTTP **404** — wrong service on `:8000` lacks `/api/chat` |
+| I-L04 | `GET http://localhost:3000/health` via rewrite | AC-06a | **FAIL** | Returns `recruitment-assistant-api`, not B-Mobile health schema |
+| I-L05 | Browser E2E: disclosure → submit PIN query | AC-01, AC-02 | **PARTIAL** | UI FSM works (Ready → Looking that up → Finished); reply shows HTTP 404 + escalate copy; **no grounded PIN answer** |
+| I-L06 | Crew kickoff (Python, UTF-8 console) | AC-02 | **FAIL** | `litellm.NotFoundError: model "llama3.2:3b" not found` on classify task |
+| I-L07 | Prompt trace `{LOG_DIR}/{trace_id}.json` | AC-02c | **FAIL** | No trace files under `project-context/2.build/logs/` after failed runs |
+| I-L08 | Operator strip `steps[]` on failure | AC-02, AC-05 | **FAIL** | Empty steps when crew fails before task completion |
+| I-L09 | `npx tsc --noEmit` | — | **PASS** | No TypeScript errors (2026-08-26) |
+
+### Browser smoke — PIN query (`how do I reset pin`)
+
+| Step | Observed | Result |
+|------|----------|--------|
+| Disclosure banner + **I understand** | Banner compacts; copy updates | **PASS** |
+| Submit query | User bubble + pending “Understanding your question …” | **PASS** |
+| Status FSM | **Looking that up…** → **Finished** | **PASS** |
+| B-Mobile reply | “We could not complete this request…” + “Support is unavailable (HTTP 404)…” | **FAIL** (expected Path A resolve + KB sources) |
+| Escalation | Stub reference `STUB-7F9BEC43` shown | **PASS** (error-path envelope) |
+| Specialist strip | Expandable; no agent step summaries | **FAIL** (empty `steps[]`) |
+
+### Root-cause notes
+
+**Port 8000 listeners (Windows, 2026-08-26):**
+
+| PID | Process | Impact |
+|-----|---------|--------|
+| 34128 | `wslrelay.exe` | Steals `:8000` traffic |
+| 12964 | `com.docker.backend` | Steals `:8000` traffic; serves `recruitment-assistant-api` health |
+| 11616, 45204 | `python` (uvicorn) | Two B-Mobile backend instances — stale model config possible |
+
+**LLM:** `.env` sets `OLLAMA_MODEL=llama3.2:3b`. Ollama Cloud API rejects this model name. Running uvicorn (PID 11616) logged `Model: qwen3.5:cloud` at startup — env/process mismatch suggests stale or competing processes.
+
+**Windows logging:** CrewAI EventBus handlers fail with `'charmap' codec can't encode character '\U0001f680'` when console encoding is not UTF-8. Cosmetic for API, but obscures diagnostics.
+
+---
+
+### Defects (live integration)
+
+| ID | Severity | AC / area | Description | Owner |
+|----|----------|-----------|-------------|-------|
+| DEF-INT-01 | **Critical** | Integration / DevOps | **Port 8000 conflict** — Docker, WSL, and duplicate Python backends share `:8000`; frontend rewrite non-deterministic | `@devops.eng` / operator |
+| DEF-INT-02 | **Critical** | AC-02…05 | **Invalid Ollama model** — `llama3.2:3b` not found; crew fails on first LLM call | `@backend.eng` |
+| DEF-INT-03 | **Critical** | AC-02…05 | **Frontend `POST /api/chat` → HTTP 404** via Next.js rewrite when wrong `:8000` listener wins | `@integration.eng` (blocked by DEF-INT-01) |
+| DEF-INT-04 | Medium | AC-02, AC-05 | **Empty `steps[]` on crew failure** — pipeline visibility lost; UI shows no agent summaries | `@backend.eng` |
+| DEF-INT-05 | Medium | AC-06b | **Misleading dual error copy in UI** — generic escalate text plus raw “HTTP 404” system message | `@frontend.eng` |
+| DEF-INT-06 | Low | AC-06a | **Health rewrite returns foreign service** (`recruitment-assistant-api`) | `@integration.eng` |
+| DEF-INT-07 | Low | Observability | **Prompt trace files not written** on observed failure paths | `@backend.eng` |
+| DEF-INT-08 | Low | DevOps | **Duplicate uvicorn processes** with potentially different `OLLAMA_MODEL` values | operator |
+
+### Remediation (operator checklist)
+
+1. **Free port 8000** — stop Docker/WSL containers using `:8000`, or change `BACKEND_PORT` / `NEXT_PUBLIC_API_BASE_URL` to an unused port (e.g. `8001`).
+2. **Run exactly one backend** — `python -m uvicorn backend.main:app --host 127.0.0.1 --port 8001` from repo root with venv active.
+3. **Fix Ollama model** — set `OLLAMA_MODEL` to a model confirmed on Ollama Cloud (e.g. `qwen3.5:cloud` per running instance log, or pull/list via Ollama API); restart backend after change.
+4. **Align frontend env** — update `frontend/.env.local` `NEXT_PUBLIC_API_BASE_URL` to match backend port; restart `npm run dev`.
+5. **Windows console** — `$env:PYTHONIOENCODING='utf-8'` before uvicorn to reduce EventBus noise.
+6. **Re-run Path A** — “How do I reset my B-Mobile My Account PIN?” → expect `decision: resolve`, non-empty `sources_used`, four `steps[]`.
+
+Recommend `@backend.eng` fix DEF-INT-02/04/07, then `@integration.eng` re-verify I-L03–I-L05 after DEF-INT-01 cleared. `@security.eng` before Deliver.
+
+---
+
+## Historical — Frontend mock QA (2026-08-15)
+
+**Status**: **PASS with scoped gaps** — UI + mock Paths A/B/C only; live crew / FastAPI not in scope.
+
+**Harness**: Cursor IDE browser against `http://localhost:3000/`; `npx tsc --noEmit` PASS; `GET /api/kb` mock CSV loader
 
 ---
 
@@ -286,12 +450,13 @@ Runtime checks deferred: YAML load, Prompt Trace file for `trace_id`, real `tick
 | Static checks | `npx tsc --noEmit` PASS; `npx next lint` PASS (0 warnings); `GET /api/kb` 200 CSV 12 FAQs |
 | Prompt Trace | Omitted — UI + mocks; no secrets |
 
-### Audit (retest chat UI)
+### Audit (live integration retest — PASS)
 
 | Field | Value |
 |-------|-------|
-| Timestamp | 2026-08-15T17:28:00-05:00 |
+| Timestamp | 2026-08-26T13:39:00-05:00 |
 | Persona id | qa-eng |
-| Action | qa (browser smoke after chat window + Start new conversation; expected checks synced) |
-| Result | **PASS with scoped gaps** — Chat + Get help + Looking that up; Path A sources; Path B escalate; Path C request_human; Start new conversation clears thread. Open: DEF-02, DEF-03, DEF-05, AC-06a/b live, ST-02 red unexercised. DEF-04 closed. |
-| Prompt Trace | Omitted — UI + mocks; no secrets |
+| Action | qa + verify-flow after port 8001 + gemma4:31b fixes |
+| Result | **PASS** Path A PIN query via API, proxy, and browser (isolated) |
+| Test query | `how do I reset pin` |
+| Open | DEF-INT-09 concurrent-request proxy reset; DEF-INT-04…08 from prior run partially addressed |

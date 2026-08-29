@@ -13,7 +13,7 @@ This is a course/demo orchestration layer — not a CCaaS or live ticketing suit
 | Phase | State |
 |-------|--------|
 | **Define** | Complete — MRD, PRD, context summary, and SAD reviewed against each other (**PASS**, 2026-08-14) |
-| **Build** | Frontend mocks + B-Mobile seed KB `backend/kb/articles.csv` — backend crew not yet live |
+| **Build** | Backend crew live + SSE streaming; frontend wired to API |
 | **Deliver** | Not started |
 
 **Runtime:** `crewai` (locked for this course MVP).  
@@ -31,17 +31,21 @@ A customer opens a web chat, sees an AI disclosure, and sends a message. The bac
 query_classifier → knowledge_retriever → response_specialist → escalation_manager
 ```
 
-The API then returns a single non-streaming JSON `ChatResponse`: resolve with sources, or escalate with a packet and a stub ticket id (`STUB-…`).
+The API returns a **`ChatResponse`** after the crew finishes. The browser uses **SSE progress streaming** (`POST /api/chat/stream`) so long runs do not hit proxy timeouts; a legacy non-streaming `POST /api/chat` remains for scripts.
 
 | Demo path | Example | Expected |
 |-----------|---------|----------|
 | **A** — in-KB FAQ | `How do I reset my B-Mobile My Account PIN?` | `decision=resolve`, citations, no packet |
-| **B** — unknown topic | `What is your quantum warranty for the hardware drone?` | `decision=escalate` (never resolve-only refuse), packet + stub |
+| **B** — unknown in-scope topic | Obscure B-Mobile question not in KB | `decision=resolve` when low urgency + neutral; polite gap reply (no human-agent pitch) |
+| **B′** — out of scope | `What is the capital of France?` | `decision=resolve`, B-Mobile-scope boundary message; no human-agent recommendation |
 | **C** — request human | Billing complaint with `request_human=true` | `decision=escalate`, `reason_codes` include `request_human`, all four steps |
+| **G** — greeting | `hello` | `decision=resolve`, friendly welcome; no STUB / specialist banner |
 
-**In MVP:** Next.js UI, FastAPI gateway, local CSV KB (≥10 **B-Mobile** FAQ rows in `backend/kb/articles.csv`), in-memory ticket stub, operator strip, Prompt Trace files.
+**Guardrails** (greeting resolve, low-urgency calm resolve, out-of-scope copy, neutral-sentiment UI): see [`RUNNING.md`](RUNNING.md#guardrails-2026-08-27) and `project-context/2.build/backend.md`.
 
-**Out of MVP:** live Zendesk/Intercom, streaming tokens, multi-turn clarifier, CSAT dashboard, database, SSO, voice, CRM writes, fifth agent, biometric emotion.
+**In MVP:** Next.js UI, FastAPI gateway, local CSV KB (≥10 **B-Mobile** FAQ rows in `backend/kb/articles.csv`), in-memory ticket stub, operator strip, Prompt Trace files, **SSE crew progress stream**.
+
+**Out of MVP:** live Zendesk/Intercom, LLM token streaming, multi-turn clarifier, CSAT dashboard, database, SSO, voice, CRM writes, fifth agent, biometric emotion.
 
 ---
 
@@ -53,7 +57,7 @@ The API then returns a single non-streaming JSON `ChatResponse`: resolve with so
 | Backend | Python + FastAPI + CrewAI (YAML agents/tasks) |
 | Retrieval | TF-IDF / bag-of-words over `backend/kb/articles.csv` (floor `0.35`) |
 | LLM | OpenAI-compatible; tiers `OPENAI_MODEL_LOW` / `OPENAI_MODEL_MID` |
-| Transport | Non-streaming JSON — `POST /api/chat`, `GET /health` |
+| Transport | **SSE progress** (`POST /api/chat/stream`) + legacy JSON (`POST /api/chat`) |
 
 Acceptance criteria for QA: `AC-01` … `AC-06` in the [PRD](project-context/1.define/prd.md).
 

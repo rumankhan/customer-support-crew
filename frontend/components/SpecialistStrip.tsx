@@ -63,6 +63,55 @@ export function SpecialistStrip({ result }: Props) {
           ))}
         </ol>
       ) : null}
+      {result.approval ? (
+        <div className="mt-3 rounded-md border border-line bg-canvas p-3 text-sm">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">
+            Manager approval
+          </p>
+          <p className="mt-1 font-medium">
+            {result.approval.status === "pending"
+              ? UI.managerReview
+              : result.approval.status === "approved"
+                ? "Manager approved"
+                : "Manager denied"}
+          </p>
+          <dl className="mt-2 grid gap-1 text-xs">
+            <div>
+              <dt className="text-muted">Ref</dt>
+              <dd className="font-mono">{result.approval.id}</dd>
+            </div>
+            <div>
+              <dt className="text-muted">Action</dt>
+              <dd>{result.approval.action_kind}</dd>
+            </div>
+            <div>
+              <dt className="text-muted">Account / order</dt>
+              <dd className="font-mono">{result.approval.subject_id}</dd>
+            </div>
+            {result.approval.amount != null ? (
+              <div>
+                <dt className="text-muted">Amount</dt>
+                <dd>${result.approval.amount.toFixed(2)}</dd>
+              </div>
+            ) : null}
+            {typeof result.approval.context?.lookup_number === "number" ? (
+              <div>
+                <dt className="text-muted">Lookup #</dt>
+                <dd className="font-mono">{String(result.approval.context.lookup_number)}</dd>
+              </div>
+            ) : null}
+            {result.approval.status === "denied" && result.approval.operator_note ? (
+              <div className="sm:col-span-2">
+                <dt className="text-muted">Deny reason</dt>
+                <dd>{result.approval.operator_note}</dd>
+              </div>
+            ) : null}
+          </dl>
+          <p className="mt-2 text-xs text-muted">
+            Approve or deny in Telegram — this panel is read-only.
+          </p>
+        </div>
+      ) : null}
       {result.packet ? (
         <div className="mt-3">
           <p className="text-xs font-medium text-muted">{UI.specialistNotes}</p>

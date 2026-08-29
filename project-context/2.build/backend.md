@@ -46,10 +46,14 @@ This document details the backend implementation for the Multi-Agent Customer Su
 backend/
 ├── __init__.py           # Package marker
 ├── main.py               # FastAPI app with endpoints
-├── crew.py               # CustomerSupportCrew orchestrator
+├── crew.py               # CustomerSupportCrew orchestrator (loads from YAML)
 ├── models.py             # Pydantic schemas (9 models)
 ├── tools.py              # kb_search (TF-IDF) + ticket_stub
+├── llm_config.py         # LLM provider resolution (OpenAI/Ollama)
 ├── requirements.txt      # Python dependencies
+├── config/
+│   ├── agents.yaml       # 4 agent definitions (CrewAI adapter)
+│   └── tasks.yaml        # 4 task definitions with context
 └── kb/
     ├── articles.csv      # 12 B-Mobile FAQ rows (id, title, body)
     └── README.md         # KB documentation
@@ -156,6 +160,7 @@ Nine structured models aligned with SAD §2 contracts:
   - Low tier (default `gpt-4o-mini` / `gemma4:31b`) → classifier, retriever, escalation_manager
   - Mid tier (default `gpt-4o-mini` / `gemma4:31b`) → response_specialist
   - Fallback: `OPENAI_MODEL` (OpenAI) or `OLLAMA_MODEL` (Ollama)
+- **Loads agent and task definitions from YAML** (`backend/config/agents.yaml`, `backend/config/tasks.yaml`) per CrewAI adapter rules
 - Creates 4 Agent instances with CrewAI LLM objects
 - Temperature: 0.2 (low tier), 0.4 (mid tier)
 - `allow_delegation=False` on all agents
@@ -192,10 +197,11 @@ Nine structured models aligned with SAD §2 contracts:
    - Output: `EscalationOutput`
 
 **Task Creation** (`_create_tasks`):
+- Loads task definitions from `backend/config/tasks.yaml` per CrewAI adapter rules
 - Dynamically creates 4 Task objects for each kickoff
-- Injects `{message}` and `{request_human}` into task descriptions
-- Sets `output_pydantic` to corresponding model class
-- Configures `context` dependencies: 
+- Injects `{message}`, `{request_human}`, and `{classifier_confidence_min}` into YAML template descriptions
+- Maps `output_pydantic` field names to Pydantic model classes
+- Configures `context` dependencies from YAML: 
   - retrieve → [classify]
   - compose → [classify, retrieve]
   - triage → [classify, retrieve, compose]
@@ -207,13 +213,37 @@ Nine structured models aligned with SAD §2 contracts:
 - `verbose=True` for observability
 - Returns dict with result, tasks, inputs
 
-**Escalation Rules** (enforced in triage_and_escalate task description):
-1. `request_human=true` → ESCALATE ("request_human")
-2. `gap=true` or `refused=true` → ESCALATE ("retrieval_gap" / "refused")
-3. `confidence < CLASSIFIER_CONFIDENCE_MIN` → ESCALATE ("low_confidence")
-4. `risk=high` → ESCALATE ("high_risk_sentiment")
-5. `sentiment=negative` AND (risk=medium/high OR request_human OR gap OR refused OR low confidence) → ESCALATE ("high_risk_sentiment")
-6. Otherwise → RESOLVE
+**Escalation Rules** (enforced in `triage_and_escalate` task description in `backend/config/tasks.yaml`):
+
+| # | Rule | Decision |
+|---|------|----------|
+| 0 | Greeting / small_talk / thanks / farewell; `request_human=false` | **RESOLVE** |
+| 0a | `out_of_scope` intent; `request_human=false` | **RESOLVE** |
+| 0b | `urgency=low` + neutral/positive sentiment + low/medium risk; `request_human=false` | **RESOLVE** |
+| 1 | `request_human=true` | ESCALATE (`request_human`) |
+| 2 | `gap=true` or `refused=true` (unless 0 / 0a / 0b apply) | ESCALATE (`retrieval_gap` / `refused`) |
+| 3 | `confidence < CLASSIFIER_CONFIDENCE_MIN` | ESCALATE (`low_confidence`) |
+| 4 | `risk=high` | ESCALATE (`high_risk_sentiment`) |
+| 5 | `sentiment=negative` AND (risk/gap/refused/low confidence/request_human) | ESCALATE (`high_risk_sentiment`) |
+| — | Otherwise | **RESOLVE** |
+
+### Guardrails — deterministic post-processing (2026-08-27)
+
+The escalation agent may still emit `decision=escalate` on KB gaps. **`backend/chat_service.py`** applies overrides in `map_to_response()` so customer-facing behavior matches product intent:
+
+| Function | When applied | Effect |
+|----------|--------------|--------|
+| `apply_greeting_resolve_override()` | Classifier intent is greeting / small_talk | `decision=resolve`; strip soft reason codes; default welcome reply |
+| `apply_low_urgency_resolve_override()` | `urgency=low`, neutral/positive, not high risk, no hard reason codes | `decision=resolve`; gap reply without human handoff |
+| `apply_out_of_scope_reply_policy()` | Intent is `out_of_scope` / off-topic | `decision=resolve`; `OUT_OF_SCOPE_REPLY` or sanitized reply (strips “human agent” pitches) |
+
+**Hard escalate reason codes** (overrides never apply): `request_human`, `high_risk_sentiment`, `timeout`, `system_error`.
+
+**Soft reason codes** (stripped on resolve override): `retrieval_gap`, `refused`, `low_confidence`.
+
+**Compose guardrail:** `compose_response` in `tasks.yaml` — out-of-scope refusals must not recommend a human agent; in-scope KB gaps may suggest another B-Mobile question only.
+
+**SAD note:** Original ADR-16 required gap/refuse → escalate. MVP guardrails **relax** that for greetings, low-urgency calm interactions, and out-of-scope questions — document under Assumptions until PRD/SAD are formally amended.
 
 ### 3.4 FastAPI Backend (`backend/main.py`)
 
@@ -223,18 +253,15 @@ Nine structured models aligned with SAD §2 contracts:
 - Returns `{"status": "ok"}` (AC-06a)
 - No auth required
 
-**POST /api/chat**
+**POST /api/chat/stream** (primary)
+- SSE progress via `backend/streaming.py` + `chat_service.map_to_response()`
+- Events: `started`, `stage`, `heartbeat`, `complete` | `error`
+- Timeout: `CHAT_TIMEOUT_SECONDS` (default 180s)
+
+**POST /api/chat** (legacy JSON)
 - Request: `ChatRequest` (validated by Pydantic)
-- Process:
-  1. Validate message (1-4000 chars)
-  2. Generate trace_id (UUID)
-  3. Run crew.kickoff() with 45s asyncio timeout
-  4. Map task outputs → ChatResponse
-  5. Write prompt trace
-  6. Store as last_result (in-memory)
-  7. Return HTTP 200 + JSON (success or error envelope)
-- Timeout: 45s soft timeout (SAD §2)
-- CORS: Allows `localhost:3000` and `127.0.0.1:3000`
+- Process: kickoff → `map_to_response()` → prompt trace → JSON
+- Used by scripts/tests (`test_ollama_backend.py`)
 
 **GET /api/last-result**
 - Optional polish endpoint (not required for AC-05 per SAD ADR-14)
@@ -247,7 +274,7 @@ All errors return HTTP 200 with error envelope (prefer consistent schema for FE)
 
 | Error Code | When | Response |
 |------------|------|----------|
-| `llm_or_timeout` | Crew timeout (45s) or LLM failure | decision=escalate, minimal packet, reason_codes=["timeout"] |
+| `llm_or_timeout` | Crew timeout or LLM failure | decision=escalate, minimal packet, reason_codes=["timeout"] |
 | `kb_unavailable` | articles.csv missing/unreadable | decision=escalate, minimal packet, reason_codes=["system_error"] |
 | `system_error` | Unexpected exception | decision=escalate, minimal packet, reason_codes=["system_error"] |
 | `validation_error` | Invalid ChatRequest (400 before kickoff) | Optional: prefer same envelope shape when practical |
@@ -259,26 +286,26 @@ All errors return HTTP 200 with error envelope (prefer consistent schema for FE)
 - Generate stub_ticket_id
 - Helps operators avoid blind escalations
 
-#### Mapper Function (`_map_to_response`)
+#### Mapper (`map_to_response` in `backend/chat_service.py`)
 
-Maps crew task outputs to ChatResponse fields per SAD §2 mapper table:
+Maps crew task outputs to ChatResponse fields per SAD §2 (shared by JSON and SSE paths):
 
 | Source | Maps to ChatResponse |
 |--------|---------------------|
 | ResponseOutput.reply | reply |
 | ResponseOutput.sources_used | sources_used (empty on escalate) |
-| EscalationOutput.decision | decision |
+| EscalationOutput.decision | decision (may be overridden by guardrails) |
 | EscalationOutput.sentiment | sentiment |
 | EscalationOutput.risk | risk |
 | EscalationOutput.reason_codes | reason_codes |
-| EscalationOutput.packet | packet (full object on escalate; null on resolve) |
-| EscalationPacket.stub_ticket_id | stub_ticket_id (also inside packet) |
+| EscalationOutput.packet | packet (null after resolve guardrails) |
+| EscalationPacket.stub_ticket_id | stub_ticket_id |
 | Each completed task | steps[] entry {agent, summary} |
 | New UUID | trace_id |
 | Request disclosure fields | meta {ai_disclosure, disclosure_acknowledged} |
 | Exception/timeout | error + escalate envelope |
 
-#### Prompt Trace Logging (`_write_prompt_trace`)
+#### Prompt Trace Logging (`write_prompt_trace` in `backend/chat_service.py`)
 
 Writes `{LOG_DIR}/{trace_id}.json` per SAD §2 minimum schema:
 
@@ -368,6 +395,7 @@ Writes `{LOG_DIR}/{trace_id}.json` per SAD §2 minimum schema:
 
 **Utilities**:
 - `python-dotenv>=1.0.0` — Environment loading
+- `pyyaml>=6.0.0` — YAML config loading per CrewAI adapter
 
 ### Seed Knowledge Base (`backend/kb/articles.csv`)
 
@@ -401,7 +429,27 @@ Writes `{LOG_DIR}/{trace_id}.json` per SAD §2 minimum schema:
 
 ## 5. API Contracts
 
-### POST /api/chat
+### POST /api/chat/stream (primary — SSE)
+
+**Transport:** `text/event-stream` via `sse-starlette` (`EventSourceResponse`).
+
+**Request:** Same `ChatRequest` body as `/api/chat`.
+
+**Events:**
+
+| Event | Data | Notes |
+|-------|------|-------|
+| `started` | `{ "trace_id": "uuid" }` | Kickoff accepted |
+| `stage` | `{ "trace_id", "agent", "status": "running"\|"completed", "summary"? }` | CrewAI `task_callback` |
+| `heartbeat` | `{ "trace_id" }` | Every 15s while crew runs |
+| `complete` | `{ "response": ChatResponse }` | HTTP 200 stream end |
+| `error` | `{ "response": ChatResponse }` | Error envelope; still valid `ChatResponse` |
+
+**Implementation:** `backend/streaming.py`, shared mapper in `backend/chat_service.py`.
+
+**Timeout:** `CHAT_TIMEOUT_SECONDS` env (default **180**).
+
+### POST /api/chat (legacy JSON)
 
 **Request** (`ChatRequest`):
 ```json
@@ -607,7 +655,8 @@ Recommended test coverage:
 **Out of Scope** (per Backend persona prohibited-actions and PRD §10.3):
 - ❌ Persistent database or session storage
 - ❌ Live Zendesk/Intercom/CRM integration (stub only)
-- ❌ Streaming tokens via SSE/WebSocket (non-streaming JSON only)
+- ✅ SSE orchestration progress (`POST /api/chat/stream`) — 2026-08-27
+- ❌ LLM token streaming via SSE/WebSocket (future)
 - ❌ Multi-turn clarification state machine
 - ❌ CSAT survey integration
 - ❌ Analytics dashboard / metrics aggregation
@@ -757,7 +806,7 @@ Recommended pipeline stages:
 
 | Criterion | Status | Evidence |
 |-----------|--------|----------|
-| **agents.yaml + tasks.yaml** with 4 agents/tasks | ✅ Complete | `multi_agent_support_crew/src/config/` (reference) + `backend/crew.py` (runtime) |
+| **agents.yaml + tasks.yaml** with 4 agents/tasks | ✅ Complete | `backend/config/agents.yaml`, `backend/config/tasks.yaml` + `backend/crew.py` YAML loader |
 | **Named output_pydantic models** (9 total) | ✅ Complete | `backend/models.py` |
 | **crew.py sequential process**, memory=False, max_iter≤12 | ✅ Complete | `backend/crew.py` CustomerSupportCrew.kickoff |
 | **kb_search tool** over articles.csv (TF-IDF, floor 0.35) | ✅ Complete | `backend/tools.py` KBSearchTool |
@@ -790,7 +839,9 @@ Recommended pipeline stages:
 
 **Smoke** (QA + Integration):
 - Path A → decision=resolve, sources_used non-empty, packet=null
-- Path B → decision=escalate, reason_codes includes retrieval_gap/refused, packet present
+- Path G (greeting) → decision=resolve, no packet, no specialist banner
+- Path B′ (out of scope) → decision=resolve, scope boundary reply, no human-agent pitch
+- Path B (in-scope KB gap, low urgency) → decision=resolve when guardrails apply; escalate only with negative sentiment / request_human
 - Path C → decision=escalate, reason_codes includes request_human, 4 steps in response
 
 ---
@@ -818,7 +869,7 @@ Recommended pipeline stages:
 4. Non-streaming JSON API acceptable for MVP; StatusLine uses local FE animation (SAD ADR-15)
 5. Single backend process acceptable for ≥5 concurrent demo sessions (best-effort)
 6. Operator strip fed from last ChatResponse in FE UI state; `/api/last-result` optional polish only (SAD ADR-14)
-7. Refuse/gap always maps to `decision=escalate` (never resolve-only refuse per SAD ADR-16)
+7. Gap/refuse → escalate per SAD ADR-16 **unless** MVP guardrails apply (greeting, low-urgency calm, out-of-scope) — see § Guardrails
 8. Sentiment gates per SAD ADR-17 (not negative-alone escalation; protects Path A)
 9. 45s wall-clock timeout authoritative; per-task caps are guidance (SAD ADR-18)
 10. Model tiers (low/mid) configured via env; no per-agent model env vars (SAD ADR-19)
@@ -846,14 +897,15 @@ Recommended pipeline stages:
 
 | Field | Value |
 |-------|-------|
-| **Timestamp** | 2026-08-23T20:30:00-05:00 (updated for Ollama support) |
+| **Timestamp** | 2026-08-25T23:10:00-05:00 (YAML externalization complete) |
 | **Persona id** | backend-eng |
-| **Action** | develop-be, define-agents, implement-endpoint, document-backend, update-llm-config |
+| **Action** | develop-be, define-agents, implement-endpoint, document-backend, update-llm-config, externalize-yaml |
 | **Resolved `AAMAD_TARGET_RUNTIME`** | crewai (PRD-locked; env unset → adapter default) |
 | **LLM Providers** | OpenAI (default) + Ollama Cloud (via LiteLLM OpenAI-compatible route) |
 | **Model tiers** | OpenAI: low=gpt-4o-mini, mid=gpt-4o-mini; Ollama: gemma4:31b (all tiers) |
 | **KB algorithm** | TF-IDF / bag-of-words cosine (scikit-learn), floor 0.35 (SAD ADR-13) |
 | **Seed KB** | 12 B-Mobile FAQ rows in `backend/kb/articles.csv` (covers Path A/B demo queries) |
+| **YAML Configs** | `backend/config/agents.yaml` (4 agents), `backend/config/tasks.yaml` (4 tasks) per CrewAI adapter rules |
 | **Temperature** | low=0.2, mid=0.4 (determinism for classifiers; quality for customer prose) |
 | **Max iterations** | 12 (per crew agent; adapter baseline) |
 | **Max RPM** | 10 (crew-level rate limit) |
@@ -861,11 +913,10 @@ Recommended pipeline stages:
 | **CORS** | localhost:3000 and 127.0.0.1:3000 (both — browser origin distinction) |
 | **Prompt Trace** | `{LOG_DIR}/{trace_id}.json`, min schema per SAD §2, redacts PII/secrets |
 | **Concurrency** | Single process; `last_result` in-memory (racy under concurrent requests; acceptable for demo) |
-| **Dependencies** | crewai 0.80+, fastapi 0.104+, scikit-learn 1.3+, openai 1.0+ (also for Ollama via LiteLLM) |
-| **Files created** | backend/models.py, backend/tools.py, backend/crew.py, backend/main.py, backend/requirements.txt, backend/__init__.py, .env.example |
-| **Files updated** | multi_agent_support_crew/src/config/agents.yaml, tasks.yaml (reference only; runtime uses backend/crew.py) |
+| **Dependencies** | crewai 0.80+, fastapi 0.104+, scikit-learn 1.3+, openai 1.0+, pyyaml 6.0+ |
+| **Files created** | backend/models.py, backend/tools.py, backend/crew.py, backend/llm_config.py, backend/main.py, backend/requirements.txt, backend/__init__.py, backend/config/agents.yaml, backend/config/tasks.yaml, backend/validate_yaml_config.py, .env.example |
 | **Prohibited scope** | Database, live ticketing, streaming, analytics, SSO, MCP (per Backend persona) |
-| **Exit criteria** | Backend epic acceptance criteria (§10) met; Sprint 1 vertical slice ready for curl smoke tests |
+| **Exit criteria** | Backend epic acceptance criteria (§10) met; Sprint 1 vertical slice ready; YAML externalization complete per SAD §2 |
 | **Next epic** | Integration (`@integration.eng` → wire FE to `POST /api/chat` + verify Path A/B/C) |
 | **Prompt Trace** | Omitted — deterministic file writes; no secrets in backend implementation |
 
@@ -877,14 +928,17 @@ Recommended pipeline stages:
 |------|---------|-------|
 | `backend/models.py` | Pydantic schemas (9 models) | ~220 |
 | `backend/tools.py` | kb_search (TF-IDF) + ticket_stub | ~180 |
-| `backend/crew.py` | CustomerSupportCrew orchestrator + 4 agents/tasks | ~350 |
+| `backend/crew.py` | CustomerSupportCrew orchestrator (YAML loader) | ~200 |
+| `backend/llm_config.py` | LLM provider resolution | ~140 |
 | `backend/main.py` | FastAPI endpoints + mapper + error handling | ~420 |
-| `backend/requirements.txt` | Python dependencies | ~20 |
+| `backend/config/agents.yaml` | 4 agent definitions per CrewAI adapter | ~50 |
+| `backend/config/tasks.yaml` | 4 task definitions with context | ~120 |
+| `backend/requirements.txt` | Python dependencies | ~25 |
 | `backend/__init__.py` | Package marker | ~4 |
 | `.env.example` | Environment template | ~60 |
 | `backend/kb/articles.csv` | Seed knowledge base (12 B-Mobile FAQs) | ~13 |
 
-**Total implementation**: ~1,267 lines of Python + YAML + config
+**Total implementation**: ~1,432 lines of Python + YAML + config
 
 ---
 
@@ -935,6 +989,7 @@ ls -l project-context/2.build/logs/
 |-----------|---------|--------|-------|
 | 2026-08-23T19:30:00Z | @backend.eng | develop-be | Initial backend implementation complete; all 9 models, 4 agents, 2 tools, FastAPI endpoints, seed KB with OpenAI support |
 | 2026-08-23T20:30:00Z | @backend.eng | update-llm-config | Added Ollama Cloud provider support via `LLM_PROVIDER` env var; implemented LiteLLM OpenAI-compatible route; added `OLLAMA_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL` configuration; updated documentation sections |
+| 2026-08-25T23:05:00Z | @backend.eng | externalize-yaml | Extracted agent and task definitions to `backend/config/agents.yaml` and `backend/config/tasks.yaml` per CrewAI adapter rules; updated crew.py to load from YAML with dynamic value injection; added pyyaml dependency; fully compliant with SAD §2 YAML externalization requirement |
 
 ---
 
