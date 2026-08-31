@@ -39,7 +39,7 @@ These extensions do not add live CRM, conversation-history DB, or Approve/Deny o
 | Outcome/measurable resolution over seat bots | KPIs: containment, grounded rate, escalate reasons; Prompt Trace |
 | Mid-market wants layer beside ticketing, not rip-replace | No live Zendesk in MVP; ticket **stub**; focus on chat orchestration |
 | Art. 50 AI disclosure / avoid biometric emotion risk | Disclosure P0 (`AC-01`); text-only sentiment inside escalation agent |
-| 6-week / course complexity | Local KB, no DB, non-streaming JSON, ≤4 agents |
+| 6-week / course complexity | Local KB + SQLite demo store, SSE progress, ≤4 agents |
 
 ---
 
@@ -268,10 +268,10 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 - Visual implementation details live in `frontend.md`; behavior contracts remain in SAD §2
 
 ### Agent Interaction Design
-- **StatusLine UX contract (non-streaming):** On send, cycle “Understanding your question → Searching help articles → Writing a reply → Checking next steps” on a **local timer** (also shown in a pending B-Mobile bubble). On response, stop animation and render the reply in chat + authoritative `steps[]` in the specialist strip. On error/timeout, stop animation and show a safe message + escalate CTA. Do **not** invent SSE/WebSocket/streaming in MVP.
+- **StatusLine UX contract (live — SSE):** On send, show stage labels from **`POST /api/chat/stream`** `stage` events (fallback local timer until first event). On final `ChatResponse`, stop animation and render the reply in chat. HITL pending shows in chat bubbles; operator detail on **`/operator`**, not customer `/`. On error/timeout, stop animation and show a safe message + escalate CTA. Client abort **~500s** (crew 180s + HITL 300s headroom).
 - Errors: human-readable + escalate CTA
 - Explainability: short rationale + sources for operators; customers see source titles when resolving
-- Operator strip: prefer UI state from last chat response for grading; `/api/last-result` optional polish
+- Operator queue: **`/operator`** read-only projector; `/api/last-result` optional polish
 
 ---
 
@@ -303,8 +303,8 @@ Course/SAD complexity guidance caps MVP at **3–4 specialized agents**. Sentime
 | Six Build epics: Architecture, Setup, Frontend, Backend, Integration, QA | Explicit mapping in schedule + §10 epic contracts | Pass |
 | Lean MVP; SAD ≤3–4 agents | **4 agents** (sentiment merged into escalation) | Pass |
 | Chat UI MVP; FE does not wire BE | Next.js chat + placeholders; Integration owns wire-up | Pass |
-| Backend: runtime agents + chat API; **no DB / no external integrations** | Local KB + ticket stub; no Zendesk/CRM live | Pass |
-| Integration: FE↔BE chat only | Single resolve endpoint, non-streaming JSON | Pass |
+| Backend: runtime agents + chat API; **SQLite demo store**; no live Zendesk/CRM | Local KB + ticket stub + HITL approvals in `support.db` | Pass |
+| Integration: FE↔BE chat | Primary **`POST /api/chat/stream`** (SSE); legacy JSON for scripts | Pass |
 | QA: unit + integration + AC mapping | `AC-01`…`AC-06` defined | Pass |
 | Complexity fit for 6 weeks | Single chat flow, sequential crew, seed KB, stub ticket | Pass — avoid P1 creep |
 
@@ -382,7 +382,7 @@ Sufficient detail for each of the six Build-stage epics. Personas must not inven
 - Logical view: FE chat app ↔ API gateway ↔ CrewAI runtime ↔ `kb_search` tool ↔ ticket stub  
 - Process view: sequential task graph with context chaining; failure → structured error  
 - Deployment view: local monorepo or `frontend/` + `backend/` layout; optional compose later  
-- ADRs: 4-agent merge; non-streaming JSON; no DB; crewai YAML-first  
+- ADRs: 4-agent merge; SSE progress transport; SQLite demo store (ADR-20/21); crewai YAML-first  
 - Explicit Future Work list matching PRD P1/P2  
 
 **Inputs from PRD:** agent roster, task chain, stack defaults, NFR targets, exclusions  
@@ -462,7 +462,7 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 - Map task Pydantic outputs → `ChatResponse` with stable field names (`gap`, `refused`, `reason_codes`, `packet`) per SAD mapper  
 - `GET /health` → `{ "status": "ok" }`  
 - Prompt Trace persisted under `LOG_DIR` / `project-context/2.build/logs` (redact secrets; min fields per SAD §2)  
-- Soft timeout **45s**; FE client abort **50–60s**; CORS allow `localhost:3000` and `127.0.0.1:3000`  
+- Crew wall-clock timeout **`CHAT_TIMEOUT_SECONDS`** (default **180s**); HITL **`HITL_TIMEOUT_SECONDS`** (default **300s**); FE client abort **~500s**; CORS allow `localhost:3000` and `127.0.0.1:3000`  
 - `GET /api/last-result` optional polish only — **not** required for Backend or Integration exit  
 - **Prohibited:** live Zendesk/CRM APIs, analytics products, non-MVP agents. Local SQLite demo store is allowed (ADR-20/21). Conversation-history DB remains out.  
 
@@ -470,18 +470,20 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 
 ### 10.4 Frontend (`@frontend.eng` → `frontend.md`)
 
+**Historical FE epic scope (pre-Integration).** Live app: SSE `POST /api/chat/stream`, no specialist strip on customer `/`, operator queue at `/operator`. See `frontend.md` “Current state”.
+
 **Must implement (UI only — no live CrewAI / `POST /api/chat`)**
 - Next.js page at `/` with B-Mobile disclosure banner (`AC-01`)  
 - Chat window + composer (question, **I'd rather talk to a person**, **Get help**, **Start new conversation** when a thread exists)  
-- **Optimistic local StatusLine** under the chat (Understanding your question → Searching help articles → Writing a reply → Checking next steps; stop on mock/response — **no streaming protocol**)  
-- Reply in B-Mobile bubbles + specialist strip bound to mock `ChatResponse` in UI state (not a second product API path)  
+- StatusLine under the chat (stage labels; live = SSE events)  
+- Reply in B-Mobile bubbles (no specialist strip on customer `/`)  
 - **Mock KB loading (FE epic only):** retrieve from canonical `backend/kb/articles.csv` (keyword overlap, floor `0.35`) so Path A/B match SAD demo queries. A Next.js `GET /api/kb` that reads that file is a **stub loader**, not a product endpoint; Integration must not keep it as the chat API.  
 - Visible stubs: Voice, CSAT dashboard, Live ticketing (non-functional)  
 - Tailwind responsive layout  
 
-**Prohibited:** calling live FastAPI/`POST /api/chat` before Integration; implementing auth/SSO; inventing SSE/WebSocket streaming  
+**Prohibited (FE epic):** calling live FastAPI/`POST /api/chat` before Integration; implementing auth/SSO  
 
-**Exit:** `frontend.md` notes mock vs future Integration hook points; StatusLine contract documented
+**Exit:** `frontend.md` notes mock vs Integration hook points; StatusLine contract documented
 
 ### 10.5 Integration (`@integration.eng` → `integration.md`)
 
@@ -613,7 +615,7 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 |-------|-------|
 | Timestamp | 2026-08-15T17:30:00-05:00 |
 | Persona id | product-mgr |
-| Action | update-prd (§6 / §10.4 chat window, Get help, Start new conversation, specialist strip) |
+| Action | update-prd (§6 SSE StatusLine, `/operator` queue, no customer specialist strip, timeouts) |
 
 ### Audit (append)
 
@@ -622,3 +624,11 @@ Response (non-streaming) — success or post-kickoff failure prefer **HTTP 200**
 | Timestamp | 2026-08-28T23:45:00-05:00 |
 | Persona id | product-mgr |
 | Action | sync-docs (as-built SQLite FTS5, Telegram HITL, SSE; original freeze retained above) |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-08-29T11:20:00-05:00 |
+| Persona id | product-mgr |
+| Action | sync-docs (§6 SSE StatusLine; §8 complexity table; §10.3 timeouts; §10.4 historical FE scope; no customer specialist strip) |

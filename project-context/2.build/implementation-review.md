@@ -1,5 +1,7 @@
 # Backend Implementation Review vs PRD Requirements
 
+> **Historical snapshot (2026-08-23).** Superseded by [`backend.md`](backend.md) and [`RUNNING.md`](../../RUNNING.md). Live product: SQLite FTS5, SSE, 180s crew + 300s HITL, no customer specialist strip.
+
 **Review Date**: 2026-08-23  
 **Reviewer**: @backend.eng  
 **PRD Version**: project-context/1.define/prd.md  

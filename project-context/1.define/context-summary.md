@@ -8,7 +8,7 @@ An orchestrated multi-agent helpdesk crew for **B-Mobile** (fictional mobile car
 
 ## Course / complexity verdict
 
-**Pass** for 6-week AAMAD Build (Architecture → Setup → Frontend → Backend → Integration → QA): 4 agents, chat-only, local KB, ticket stub, no DB, non-streaming JSON, Next.js + CrewAI. See PRD §8 validation table and §10 epic contracts.
+**Pass** for 6-week AAMAD Build: 4 agents, chat-only, SQLite FTS5 KB + HITL demo store, ticket stub, **SSE progress** (primary) + legacy JSON `POST /api/chat`, Next.js + CrewAI. Operator queue on **`/operator`**, not the customer page. See PRD §8 and §10; as-built notes in PRD “As-built notes (2026-08-28)”.
 
 ## Define stage success indicators
 

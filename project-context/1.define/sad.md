@@ -36,7 +36,8 @@ The Multi-Agent Customer Support Crew is a chat-first MVP that runs four special
 
 | Interface | Direction | Contract |
 |-----------|-----------|----------|
-| Web chat UI (`/`) | Customer ↔ Frontend | Disclosure, chat window, composer, stage labels, specialist strip |
+| Web chat UI (`/`) | Customer ↔ Frontend | Disclosure, chat window, composer, SSE stage labels, Status |
+| Operator projector (`/operator`) | Operator ↔ Frontend | Read-only HITL queue (optional for demos) |
 | `POST /api/chat` | Frontend ↔ Backend | Non-streaming JSON request/response (primary resolve path) |
 | `GET /health` | Ops / CI ↔ Backend | `{ "status": "ok" }` |
 | `GET /api/last-result` | Operator UI ↔ Backend (optional polish) | Last in-memory `ChatResponse`; **not** required for AC-05 |
@@ -60,7 +61,7 @@ Browser (Next.js) ──POST /api/chat──► FastAPI ──kickoff──► C
 
 | Tier | In scope |
 |------|----------|
-| **MVP** | Next.js chat + disclosure; FastAPI; CrewAI sequential crew; local KB; ticket stub; operator strip; non-streaming JSON |
+| **MVP** | Next.js chat + disclosure; FastAPI; CrewAI sequential crew; SQLite FTS5 KB + HITL store; ticket stub; **`/operator`** projector; SSE orchestration progress |
 | **Future (P1/P2)** | Live ticketing, streaming UI, multi-turn clarifier, CSAT dashboard, DB/history, SSO, voice, CRM writes, cloud vector DB, 5th agent, Ollama / OpenAI-compatible local base URL, `high` model tier, API rate limiting |
 
 **Explicit exclusions (MVP):** conversation-history database, Zendesk/Intercom live APIs, biometric emotion, horizontal autoscaling, MCP servers, hierarchical CrewAI process, per-agent model env vars, API rate limiting. **In MVP (extensions):** local SQLite demo store (`support.db`) for FTS5 KB + HITL (ADR-20/21); SSE **orchestration** progress (not LLM tokens); Ollama Cloud as an allowed `LLM_PROVIDER`.
@@ -123,7 +124,7 @@ frontend/
 | CSV role | Canonical seed/export; `python -m backend.scripts.migrate_kb_csv_to_sqlite` |
 | Frontend `GET /api/kb` | Optional offline CSV view. Live chat uses crew `kb_search`, not this route |
 
-**UI requirements:** sources on resolve; escalate CTA on error; **I'd rather talk to a person** always available in the composer; responsive 375px / 1280px. Accessibility from PRD: keyboard send (Enter), focusable controls, adequate contrast for demo. Layout is a **chat window** (You right / B-Mobile left) plus Status under the chat and a **For specialists** strip. Stub I/O (`ChatRequest` / `ChatResponse`) is unchanged. **Start new conversation** clears the in-tab thread (SAD DB/history remains Future Work).
+**UI requirements:** sources on resolve; escalate CTA on error; **I'd rather talk to a person** always available in the composer; responsive 375px / 1280px. Layout is a **chat window** (You right / B-Mobile left) plus **Status** under the chat. **No specialist strip on customer `/`** — use **`/operator`** for HITL queue / grading detail. **Start new conversation** clears the in-tab thread.
 
 **Visual direction (from PRD §6):** light color theme; modern fonts (e.g. via `next/font`); MVP defaults to light mode. SAD owns behavior contracts only — detailed styling belongs in `frontend.md`.
 
@@ -134,7 +135,7 @@ frontend/
 | On send | Optimistic/local stage animation cycles Understanding your question → Searching help articles → Writing a reply → Checking next steps on a client timer |
 | First stage | UI must show the first stage label within **10s of send** (local), not “first agent finished &lt;10s” |
 | On response | Stop animation; render reply + authoritative `steps[]` |
-| On error/timeout | Stop animation; safe message + Talk-to-human CTA (FE abort **50–60s**) |
+| On error/timeout | Stop animation; safe message + Talk-to-human CTA (FE abort **~500s** for crew + HITL) |
 
 **Operator strip:** bind from the **last `ChatResponse` in FE UI state** (mock in FE epic; live response after Integration). `/api/last-result` is optional polish only.
 
@@ -237,7 +238,7 @@ FE treats **any** `ChatResponse` with `error != null` or `decision=escalate` + T
 
 | `error.code` | When |
 |--------------|------|
-| `llm_or_timeout` | LLM failure or API soft timeout (45s) |
+| `llm_or_timeout` | LLM failure or crew wall-clock timeout (`CHAT_TIMEOUT_SECONDS`, default 180s) |
 | `validation_error` | Invalid `ChatRequest` (400 before kickoff) |
 | `kb_unavailable` | KB path missing / unreadable (may also continue with `gap=true` when partial) |
 | `system_error` | Unexpected exception |
@@ -329,7 +330,7 @@ triage_and_escalate:
 | `compose_response` | response_specialist | classify + retrieve | `ResponseOutput` | 15s |
 | `triage_and_escalate` | escalation_manager | all prior + `request_human` | `EscalationOutput` | 12s |
 
-**Wall-clock vs per-task (locked):** API soft timeout **45s** is authoritative. Per-task caps are guidance and may sum above 45s; when wall-clock fires, **stop further agent work**, keep partial `steps[]`, write Prompt Trace, return error envelope (minimal packet when possible). Do not wait for remaining tasks.
+**Wall-clock vs per-task (live):** Crew wall-clock timeout **`CHAT_TIMEOUT_SECONDS`** (default **180s**) is authoritative for kickoff. HITL adds up to **`HITL_TIMEOUT_SECONDS`** (default **300s**) on the SSE stream after `pending_approval`. Per-task caps in tasks.yaml are guidance; on wall-clock fire, stop further agent work, keep partial `steps[]`, write Prompt Trace, return error envelope.
 
 **Escalation packet (`EscalationPacket` / `AC-04a`)**
 
@@ -445,12 +446,16 @@ Backend binds CrewAI agent LLMs from tier at crew build time (e.g. in `crew.py`)
 ### Failure / degrade path
 
 ```
-LLM/KB/tool failure OR wall-clock timeout (45s)
+LLM/KB/tool failure OR crew wall-clock timeout (CHAT_TIMEOUT_SECONDS, default 180s)
   → stop further agent work
   → keep partial steps[]
   → Prompt Trace + Diagnostic reason
   → error envelope (decision=escalate; minimal packet + stub when possible)
-  → FE safe message + “Talk to a human” (AC-06b); client abort at 50–60s
+  → FE safe message + “Talk to a human” (AC-06b); client abort ~500s (covers HITL wait)
+
+HITL policy action after crew
+  → decision=pending_approval; SSE waits up to HITL_TIMEOUT_SECONDS (300s)
+  → Telegram Approve/Deny; customer sees approved/denied copy in chat
 ```
 
 Tool failure on `kb_search` → treat as `gap=true` and continue (prefer escalate over invent). Client disconnect: abandon wait; no session resume. `ticket_stub` may issue a new `STUB-*` per escalate (idempotency = Future Work).
@@ -547,8 +552,8 @@ Scale-out (replicas, shared session store, managed vector DB) is Future Work; MV
 
 | Concern | Architectural response |
 |---------|------------------------|
-| End-to-end latency | p95 `/api/chat` < **30s**; FE first StatusLine label within **10s of send** (local optimistic animation per ADR-15 — not streaming); FE fetch abort **50–60s** |
-| Timeouts | Per-task caps (guidance) + API soft timeout **45s** (authoritative) → escalate envelope + partial `steps[]` + minimal packet when possible |
+| End-to-end latency | FAQ path: p95 target **< 30s** (Ollama may exceed); first SSE `stage` or local label within **10s of send** |
+| Timeouts | Crew **`CHAT_TIMEOUT_SECONDS`** default **180s**; HITL **`HITL_TIMEOUT_SECONDS`** default **300s**; FE abort **~500s** → escalate envelope + partial `steps[]` when possible |
 | LLM / KB outage | Fail-open to human (ADR-11); never invent after tool failure |
 | Agent loops / cost overrun | `max_iter ≤ 12`, `max_retry_limit ≥ 2`, crew `max_rpm` |
 | Concurrent demos | Best-effort single process; serial kickoff OK; do not treat queueing as AC failure |
@@ -560,7 +565,7 @@ Scale-out (replicas, shared session store, managed vector DB) is Future Work; MV
 |--------|-----------|
 | Liveness | `GET /health` |
 | Per-run audit | `trace_id` + Prompt Trace JSON under `LOG_DIR` (minimum schema §2) |
-| Pipeline visibility | `steps[]` in API; optimistic local StatusLine (ADR-15); operator strip from last ChatResponse |
+| Pipeline visibility | `steps[]` in API/SSE; StatusLine from SSE `stage` events; **`/operator`** for HITL queue |
 | Escalation rationale | `reason_codes` + packet |
 | Application logs | Structured stdout |
 | Advanced APM / cost dashboards | Deferred (MRD KPIs inform Future Work) |
@@ -681,7 +686,7 @@ POST /api/chat
 
 1. **Setup** (`@project.mgr`): `frontend/`, `backend/`, `backend/config/`, `backend/kb/`, `.env.example`, manifests; `setup.md` — **no business logic**.  
 2. **Backend** (`@backend.eng`): YAML agents/tasks with named `output_pydantic` models, tools (`kb_search` per ADR-13), `crew.kickoff`, FastAPI `POST /api/chat` + `/health` — **vertical slice first**.  
-3. **Frontend** (`@frontend.eng`): chat window + mocks shaped like `ChatResponse`; stub Path A/B from `articles.csv`; specialist strip/stubs after Integration smoke.  
+3. **Frontend** (`@frontend.eng`): chat window + live SSE; stub Path A/B from `articles.csv` before Integration; **`/operator`** for HITL queue (no specialist strip on customer `/`).  
 4. **Integration** (`@integration.eng`): wire `lib/api.ts` to `/api/chat` only; map last response into chat + operator strip; verify resolve + escalate.  
 5. **QA** (`@qa.eng`): unit + integration + AC-01…06 in `qa.md`.  
 6. **Deliver** (`@devops.eng`): CI + deploy.md + user-guide — no app logic changes.
@@ -718,7 +723,7 @@ POST /api/chat
 
 - [x] PRD requirements mapped to architectural components  
 - [x] Agents designed for the domain and selected runtime (`crewai`)  
-- [x] Frontend and backend contracts agree on schemas / non-streaming  
+- [x] Frontend and backend contracts agree on schemas; **SSE** is live UI transport  
 - [x] Secrets via env vars only  
 - [x] MVP vs Future Work boundaries explicit  
 - [x] Resolved `AAMAD_TARGET_RUNTIME` recorded in Audit  
@@ -833,8 +838,8 @@ POST /api/chat
 
 | Field | Value |
 |-------|-------|
-| Timestamp | 2026-08-28T23:45:00-05:00 |
+| Timestamp | 2026-08-29T11:20:00-05:00 |
 | Persona id | system-arch |
-| Action | sync-docs (as-built ADR-20 FTS5, ADR-21 Telegram HITL, SSE, ChatResponse.pending_approval) |
+| Action | sync-docs (reliability table 180s/300s/~500s; failure path; no customer specialist strip) |
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai |
 | Prompt Trace | Omitted |

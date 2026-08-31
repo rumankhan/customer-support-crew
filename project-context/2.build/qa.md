@@ -2,7 +2,7 @@
 
 **Persona**: `@qa.eng`  
 **Resolved runtime**: `crewai` (`AAMAD_TARGET_RUNTIME=crewai` in `.env`)  
-**Latest status**: **PASS** — live integration (2026-08-26/27) plus SQLite FTS5 KB and Telegram HITL (2026-08-28). Docs synced 2026-08-28.  
+**Latest status**: **PASS** — live integration (2026-08-26/27) plus SQLite FTS5 KB and Telegram HITL (2026-08-28). Docs synced 2026-08-29 (timeouts, no customer specialist strip).  
 **Prior status**: **FAIL — live integration blocked** (2026-08-26T13:05-05:00); **PASS with scoped gaps** — frontend mock smoke 2026-08-15 (see §Historical below)
 
 HITL and FTS5 were not in the 2026-08-26 browser retest. Demo script: [`RUNNING.md`](../../RUNNING.md). Validator: `python -m backend.scripts.validate_kb_hitl`.
@@ -23,7 +23,7 @@ HITL and FTS5 were not in the 2026-08-26 browser retest. Demo script: [`RUNNING.
 | I-R01 | Direct `POST :8001/api/chat` | **PASS** | `decision: resolve`, 4 steps, 2 sources, grounded PIN reply (~19s) |
 | I-R02 | `POST :3000/api/chat` via rewrite | **PASS** | `decision: resolve`, 4 steps, 2 sources |
 | I-R03 | `GET :3000/health` via rewrite | **PASS** | `{"status":"ok"}` (B-Mobile backend) |
-| I-R04 | Browser E2E (isolated run) | **PASS** | Reply + “From our help articles” sources; specialist strip shows 4 agents |
+| I-R04 | Browser E2E (isolated run) | **PASS** | Reply + “From our help articles” sources; `/operator` for HITL queue |
 | I-R05 | Browser E2E under concurrent API load | **FAIL** | HTTP 500 / `ECONNRESET` when backend already running a crew kickoff |
 
 **Remaining gap:** Backend handles one synchronous crew at a time; concurrent requests can cause Next.js proxy `socket hang up` (HTTP 500 in UI). Not MVP-blocking for single-user demo; document for production.
@@ -176,6 +176,8 @@ Recommend `@backend.eng` fix DEF-INT-02/04/07, then `@integration.eng` re-verify
 ---
 
 ## Scope and gate
+
+> **Historical — FE epic only (2026-08-15).** Live MVP status is in the header and §Live integration retest.
 
 This session tests **frontend-related SAD behaviors only**. Backend is not implemented; `lib/api.ts` re-exports stub `startRun` / `getRunStatus` and `lib/mockResponse.ts` supplies Path A/B/C `ChatResponse` shapes.
 

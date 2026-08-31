@@ -557,7 +557,7 @@ SQLite-backed queue used by Telegram and the read-only `/operator` page.
 ```json
 {
   "decision": "escalate",
-  "reply": "Request timed out after 45s. Please talk to a human agent.",
+  "reply": "Request timed out. Please talk to a human agent.",
   "sources_used": [],
   "sentiment": "neutral",
   "risk": "medium",
@@ -580,7 +580,7 @@ SQLite-backed queue used by Telegram and the read-only `/operator` page.
   "meta": { /* ... */ },
   "error": {
     "code": "llm_or_timeout",
-    "message": "Request timed out after 45s..."
+    "message": "Request timed out (CHAT_TIMEOUT_SECONDS)..."
   }
 }
 ```
@@ -804,12 +804,12 @@ Recommended pipeline stages:
 | AC-06b Failure path | Error envelope + escalate + minimal packet | `backend/main.py` _error_response |
 | §3 Runtime=crewai | CustomerSupportCrew uses CrewAI primitives | `backend/crew.py` imports + Crew() |
 | §3 4 agents | query_classifier, knowledge_retriever, response_specialist, escalation_manager | `backend/crew.py` _create_agents |
-| §3 Local KB | TF-IDF over backend/kb/articles.csv | `backend/tools.py` KBSearchTool |
+| §3 Local KB | SQLite FTS5 over `backend/data/support.db` (seed: articles.csv) | `backend/tools.py` KBSearchTool |
 | §3 Ticket stub | STUB-{uuid} format | `backend/tools.py` TicketStubTool |
 | §10.3 Named Pydantic models | 9 models matching SAD §2 | `backend/models.py` |
-| SAD ADR-13 TF-IDF retrieval | scikit-learn TfidfVectorizer, floor 0.35 | `backend/tools.py` KBSearchTool |
+| SAD ADR-13 TF-IDF retrieval | **Superseded** by ADR-20 SQLite FTS5 | `backend/tools.py` KBSearchTool |
 | SAD ADR-16 Refuse→escalate | refused=true → decision=escalate | triage_and_escalate task rules |
-| SAD ADR-18 45s timeout | asyncio.wait_for 45s | `backend/main.py` chat endpoint |
+| SAD ADR-18 timeout | `CHAT_TIMEOUT_SECONDS` default 180s; HITL 300s | `backend/chat_service.py`, `backend/streaming.py` |
 | SAD ADR-19 Model tiers | low (3 agents), mid (1 agent), tier→model map | `backend/crew.py` __init__, _create_agents |
 
 ### Agent/Task Alignment with SAD §2
@@ -840,11 +840,11 @@ Recommended pipeline stages:
 | **agents.yaml + tasks.yaml** with 4 agents/tasks | ✅ Complete | `backend/config/agents.yaml`, `backend/config/tasks.yaml` + `backend/crew.py` YAML loader |
 | **Named output_pydantic models** (9 total) | ✅ Complete | `backend/models.py` |
 | **crew.py sequential process**, memory=False, max_iter≤12 | ✅ Complete | `backend/crew.py` CustomerSupportCrew.kickoff |
-| **kb_search tool** over articles.csv (TF-IDF, floor 0.35) | ✅ Complete | `backend/tools.py` KBSearchTool |
+| **kb_search tool** SQLite FTS5 (ADR-20), floor 0.35 | ✅ Complete | `backend/tools.py` KBSearchTool |
 | **ticket_stub tool** (no-op/in-memory) | ✅ Complete | `backend/tools.py` TicketStubTool |
-| **POST /api/chat** with ChatRequest/ChatResponse schemas | ✅ Complete | `backend/main.py` chat endpoint |
+| **POST /api/chat** + **POST /api/chat/stream** (SSE) | ✅ Complete | `backend/main.py`, `backend/streaming.py` |
 | **GET /health** → {status: ok} | ✅ Complete | `backend/main.py` health_check |
-| **45s soft timeout** + error envelope + minimal packet | ✅ Complete | asyncio.wait_for + _error_response |
+| **CHAT_TIMEOUT_SECONDS** (180s) + HITL wait + error envelope | ✅ Complete | `backend/chat_service.py`, `backend/streaming.py` |
 | **Prompt Trace** to LOG_DIR (min schema §2) | ✅ Complete | `backend/main.py` _write_prompt_trace |
 | **CORS** for localhost:3000 and 127.0.0.1:3000 | ✅ Complete | CORSMiddleware in main.py |
 | **Seed KB** ≥10 FAQ rows (B-Mobile, demo A/B/C) | ✅ Complete | `backend/kb/articles.csv` (12 rows) |
@@ -899,7 +899,7 @@ Recommended pipeline stages:
 3. Live retrieval is SQLite FTS5 (ADR-20); CSV remains the hand-authored seed. Embedding / managed vector SaaS still deferred.
 4. Primary UI transport is SSE progress (not LLM tokens). Legacy JSON `POST /api/chat` remains for scripts.
 5. Single backend process acceptable for ≥5 concurrent demo sessions (best-effort)
-6. Operator strip fed from last ChatResponse in FE UI state; `/api/last-result` optional polish only (SAD ADR-14)
+6. Operator HITL detail on **`/operator`**; customer `/` has no specialist strip (SAD ADR-14 updated)
 7. Gap/refuse → escalate per SAD ADR-16 **unless** MVP guardrails apply (greeting, low-urgency calm, out-of-scope) — see § Guardrails
 8. Sentiment gates per SAD ADR-17 (not negative-alone escalation; protects Path A)
 9. Crew wall-clock timeout is `CHAT_TIMEOUT_SECONDS` (default 180); original SAD ADR-18 45s is superseded for this Ollama-backed demo
@@ -934,19 +934,19 @@ Recommended pipeline stages:
 | **Resolved `AAMAD_TARGET_RUNTIME`** | crewai (PRD-locked; env unset → adapter default) |
 | **LLM Providers** | OpenAI (default) + Ollama Cloud (via LiteLLM OpenAI-compatible route) |
 | **Model tiers** | OpenAI: low=gpt-4o-mini, mid=gpt-4o-mini; Ollama: gemma4:31b (all tiers) |
-| **KB algorithm** | TF-IDF / bag-of-words cosine (scikit-learn), floor 0.35 (SAD ADR-13) |
+| **KB algorithm** | SQLite FTS5 (ADR-20); CSV seed; ADR-13 TF-IDF historical |
 | **Seed KB** | 12 B-Mobile FAQ rows in `backend/kb/articles.csv` (covers Path A/B demo queries) |
 | **YAML Configs** | `backend/config/agents.yaml` (4 agents), `backend/config/tasks.yaml` (4 tasks) per CrewAI adapter rules |
 | **Temperature** | low=0.2, mid=0.4 (determinism for classifiers; quality for customer prose) |
 | **Max iterations** | 12 (per crew agent; adapter baseline) |
 | **Max RPM** | 10 (crew-level rate limit) |
-| **Timeout** | 45s soft timeout (asyncio); FE abort at 50-60s (SAD ADR-18) |
+| **Timeout** | Crew 180s (`CHAT_TIMEOUT_SECONDS`); HITL 300s; FE abort ~500s |
 | **CORS** | localhost:3000 and 127.0.0.1:3000 (both — browser origin distinction) |
 | **Prompt Trace** | `{LOG_DIR}/{trace_id}.json`, min schema per SAD §2, redacts PII/secrets |
 | **Concurrency** | Single process; `last_result` in-memory (racy under concurrent requests; acceptable for demo) |
 | **Dependencies** | crewai 0.80+, fastapi 0.104+, scikit-learn 1.3+, openai 1.0+, pyyaml 6.0+ |
 | **Files created** | backend/models.py, backend/tools.py, backend/crew.py, backend/llm_config.py, backend/main.py, backend/requirements.txt, backend/__init__.py, backend/config/agents.yaml, backend/config/tasks.yaml, backend/validate_yaml_config.py, .env.example |
-| **Prohibited scope** | Database, live ticketing, streaming, analytics, SSO, MCP (per Backend persona) |
+| **Prohibited scope** | Live Zendesk/CRM, analytics, SSO, MCP; conversation-history DB (local SQLite demo store is in scope) |
 | **Exit criteria** | Backend epic acceptance criteria (§10) met; Sprint 1 vertical slice ready; YAML externalization complete per SAD §2 |
 | **Next epic** | Integration (`@integration.eng` → wire FE to `POST /api/chat` + verify Path A/B/C) |
 | **Prompt Trace** | Omitted — deterministic file writes; no secrets in backend implementation |
@@ -958,7 +958,7 @@ Recommended pipeline stages:
 | File | Purpose | Lines |
 |------|---------|-------|
 | `backend/models.py` | Pydantic schemas (9 models) | ~220 |
-| `backend/tools.py` | kb_search (TF-IDF) + ticket_stub | ~180 |
+| `backend/tools.py` | kb_search (SQLite FTS5) + ticket_stub | ~180 |
 | `backend/crew.py` | CustomerSupportCrew orchestrator (YAML loader) | ~200 |
 | `backend/llm_config.py` | LLM provider resolution | ~140 |
 | `backend/main.py` | FastAPI endpoints + mapper + error handling | ~420 |
@@ -1021,6 +1021,7 @@ ls -l project-context/2.build/logs/
 | 2026-08-23T20:30:00Z | @backend.eng | update-llm-config | Added Ollama Cloud provider support via `LLM_PROVIDER` env var; implemented LiteLLM OpenAI-compatible route; added `OLLAMA_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL` configuration; updated documentation sections |
 | 2026-08-25T23:05:00Z | @backend.eng | externalize-yaml | Extracted agent and task definitions to `backend/config/agents.yaml` and `backend/config/tasks.yaml` per CrewAI adapter rules; updated crew.py to load from YAML with dynamic value injection; added pyyaml dependency; fully compliant with SAD §2 YAML externalization requirement |
 | 2026-08-28T23:45:00-05:00 | @backend.eng | sync-docs | Documented SQLite FTS5 (ADR-20), Telegram HITL (ADR-21), SSE HITL events, approval APIs, 180s crew / 300s HITL timeouts, port 8001 demo |
+| 2026-08-29T11:20:00-05:00 | @backend.eng | sync-docs | Traceability + audit appendix: FTS5 live, 180s/300s/~500s; no customer specialist strip; superseded 45s/TF-IDF rows |
 
 ---
 

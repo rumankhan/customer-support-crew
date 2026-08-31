@@ -18,7 +18,7 @@ Successfully integrated the Next.js frontend chat interface with the FastAPI bac
 - Implemented robust error handling with `ChatResponse` envelope normalization
 - Configured Next.js API rewrites for same-origin proxy pattern
 - Resolved IPv6/IPv4 localhost resolution issue
-- Aligned frontend timeout (95s) with backend's 90s Ollama timeout
+- Aligned frontend abort (~500s) with crew timeout (180s) + HITL wait (300s)
 - Added session ID generation and management
 - Validated all acceptance criteria (AC-01 through AC-06)
 - **SSE progress streaming** (`POST /api/chat/stream`) — real agent stage events; fixes long-run proxy timeouts (DEF-INT-09)
@@ -100,13 +100,14 @@ Overrides run in `map_to_response()` **after** crew kickoff; they clear `packet`
 **Contract compliance:**
 - Request: `ChatRequest` per SAD §2 (message, request_human, session_id, disclosure_acknowledged)
 - Response: `ChatResponse` per SAD §2 (decision, reply, sources_used, error, etc.)
-- Timeout: Client aborts at 95s (backend soft timeout 45s, Ollama 90s)
+- Timeout: Client aborts at **~500s** (crew `CHAT_TIMEOUT_SECONDS` 180s + HITL `HITL_TIMEOUT_SECONDS` 300s headroom)
 - CORS: Not needed (same-origin via rewrites)
 
 ### 2.2 Chat Workflow Hook (`frontend/lib/useResearchWorkflow.ts`)
 
 **Changes:**
-- Updated `CLIENT_ABORT_MS` to `95_000` (95 seconds, above backend's 90s)
+- Primary path uses **`postChatStream`** / SSE (see §1.1); legacy `postChat` remains for scripts
+- Updated `CLIENT_ABORT_MS` to **~500_000** ms (crew + HITL headroom)
 - Added `sessionIdRef` and `ensureSessionId()` to generate and manage session IDs
 - Modified `submit` function to:
   - Use live `postChat` with `ChatRequest` containing session_id
@@ -236,7 +237,7 @@ curl http://localhost:3000/health
 - CORS headers: Present for `http://localhost:3000` and `http://127.0.0.1:3000`
 
 **Client timeout:**
-- Frontend aborts request after 95s
+- Frontend aborts request after **~500s** (see `CLIENT_ABORT_MS` in `useResearchWorkflow.ts`)
 - `chatEnvelope.timeoutEnvelope` returns consistent error response
 - UI shows "The crew timed out" message
 

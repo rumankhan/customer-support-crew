@@ -50,7 +50,7 @@ Vague credit/fee requests (no `ACC-*` / dollar amount) still go to HITL with a r
 
 **Guardrails** (greeting resolve, low-urgency calm resolve, out-of-scope copy): [`RUNNING.md`](RUNNING.md#guardrails-2026-08-27) and `project-context/2.build/backend.md`.
 
-**In MVP:** Next.js chat + `/operator` projector queue, FastAPI gateway, CrewAI YAML crew, **SQLite FTS5** KB (`backend/data/support.db`, seeded from `backend/kb/articles.csv`), stub accounts/orders, in-memory ticket stub, specialist strip (read-only), Prompt Trace files, SSE crew progress, **Telegram manager HITL**.
+**In MVP:** Next.js chat (customer `/` — no specialist strip; use `/operator` for queue), FastAPI gateway, CrewAI YAML crew, **SQLite FTS5** KB (`backend/data/support.db`), stub accounts/orders, in-memory ticket stub, Prompt Trace files, SSE crew progress, **Telegram manager HITL**.
 
 **Out of MVP:** live Zendesk/Intercom, LLM token streaming, multi-turn clarifier, CSAT dashboard, conversation-history DB, SSO, voice, real CRM writes, Approve/Deny on the customer page, fifth agent, biometric emotion.
 

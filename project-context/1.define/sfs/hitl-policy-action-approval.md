@@ -181,7 +181,7 @@ Ref: {approval_id} | Trace: {trace_id}
 | HITL-AC-03 | “Cancel my plan and waive the $150 ETF on ACC-2002” creates `etf_waiver` pending approval |
 | HITL-AC-04 | Manager Approve on Telegram → customer chat shows approved copy via SSE `approval_decided` |
 | HITL-AC-05 | Manager Deny on Telegram → customer chat shows denied copy (optional note) |
-| HITL-AC-06 | Customer page SpecialistStrip is read-only (no Approve/Deny buttons) |
+| HITL-AC-06 | Customer page `/` has **no** specialist strip; operator detail on **`/operator`** only |
 | HITL-AC-07 | Callbacks from a chat ID other than `TELEGRAM_MANAGER_CHAT_ID` are ignored |
 | HITL-AC-08 | Duplicate callbacks are idempotent (already-decided rows ignored) |
 | HITL-AC-09 | Missing account/order ID → clarifying question, no HITL |
@@ -191,7 +191,7 @@ Ref: {approval_id} | Trace: {trace_id}
 
 | Step | Target |
 |------|--------|
-| Crew + detection | ≤ existing p95 (≤45s) |
+| Crew + detection | ≤ `CHAT_TIMEOUT_SECONDS` (default 180s); HITL wait ≤ `HITL_TIMEOUT_SECONDS` (300s) |
 | Telegram notification delivery | ~1s (long-polling mode) |
 | Manager decision (demo) | Manual — typically <60s in demo |
 | Approval timeout | 300s (configurable `HITL_TIMEOUT_SECONDS`) |

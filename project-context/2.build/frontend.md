@@ -7,12 +7,15 @@
 **Feature ID**: FE-CRW-001  
 **Primary UI**: `/` (customer) and `/operator` (projector)
 
-### Current state (2026-08-28)
+### Current state (2026-08-29)
 
-- `useResearchWorkflow` streams `POST /api/chat/stream` (Next.js proxy `frontend/app/api/chat/stream/route.ts`). Client abort **~500s** to cover crew + HITL.
-- `ChatResponse.decision` may be `pending_approval`; specialist strip is **read-only** (lookup #, deny reason). Approve/Deny is **Telegram only**.
-- `/operator` shows the approval projector queue (no buttons).
-- `GET /api/kb` still serves the CSV for offline demos; live answers come from crew `kb_search` (SQLite FTS5).
+- Customer page **`/`**: chat + Status only — **no `SpecialistStrip`** (removed for cleaner demos).
+- **`/operator`**: read-only HITL projector queue (approval ref, action, lookup #, deny reason).
+- `useResearchWorkflow` streams `POST /api/chat/stream`. Client abort **~500s** (crew + HITL).
+- Approve/Deny is **Telegram only**; customer sees pending/approved/denied copy in chat bubbles.
+- `GET /api/kb` still serves CSV for offline demos; live answers use crew `kb_search` (SQLite FTS5).
+
+Sections below marked **(historical FE epic)** describe the pre-Integration mock build.
 
 This file is the single frontend artifact: **behavior contract** (Inputs / Run / Results / History) plus **implementation log**. Former `frontend-funcional-spec.md` content lives here — **do not split** into a second markdown file.
 
@@ -20,17 +23,17 @@ This file is the single frontend artifact: **behavior contract** (Inputs / Run /
 
 ## Purpose and scope
 
-Let a B-Mobile customer submit a support question, watch a mocked run complete (`idle → running → done`), and read a grounded reply or handoff in the same chat thread.
+Let a B-Mobile customer submit a support question, watch the crew run (SSE stages + HITL wait when applicable), and read a grounded reply or handoff in the chat thread.
 
-**In scope:** chat window + compact composer, run FSM + stub `postChat`, specialist strip from last `ChatResponse`, session thread in React state, Spec Sync checklist.
+**In scope:** chat window + compact composer, run FSM + live SSE stream, session thread in React state, `/operator` projector for grading/HITL queue.
 
-**Out of scope:** live `POST /api/chat` (Integration); streaming tokens; SSO; Voice / CSAT / live ticketing (visible stubs only); persisted run history / localStorage (SAD Future Work).
+**Out of scope on customer `/`:** specialist strip (moved to `/operator` or dropped); Approve/Deny buttons; persisted history / localStorage.
 
 ### Traceability
 
 | Anchor | Reference |
 |--------|-----------|
-| PRD §6 Interface Requirements | Chat page `/`, disclosure, status line, chat reply, specialist strip, talk-to-a-person |
+| PRD §6 Interface Requirements | Chat page `/`, disclosure, status line, chat reply, `/operator` queue, talk-to-a-person |
 | PRD §10.4 Frontend epic | UI only; mocks; no live BE; Tailwind + Next.js App Router + TypeScript |
 | PRD AC-01…AC-06 | Disclosure, resolve/escalate UX, operator fields, failure CTA |
 | SAD §2 Frontend logical structure | `app/page.tsx`, components, `lib/types.ts`, `lib/api.ts` mocks |
@@ -240,7 +243,9 @@ Single composer inside `ChatWindow` on `/`. Submit is enabled whenever the FSM i
 
 ## Run
 
-Lightweight client FSM in `lib/fsm.ts`. No Redux. No streaming protocol. **No poller.**
+> **Historical FE epic** (pre-Integration mock). Live app: SSE `postChatStream`, `CLIENT_ABORT_MS = 500_000`, no specialist strip on `/`.
+
+Lightweight client FSM in `lib/fsm.ts`. No Redux. **Live:** SSE via `POST /api/chat/stream`. **No poller.**
 
 ```
 idle → running → done
@@ -250,13 +255,13 @@ idle → running → done
 |-------|---------|----|
 | `idle` | No active run | Composer enabled; chat shows prior turns or empty prompt |
 | `running` | Stub `postChat` in flight | Composer disabled; Status **Looking that up**; local stage labels (ADR-15); pending B-Mobile bubble; first label within 10s of send |
-| `done` | One JSON `ChatResponse` returned | Composer enabled; pending bubble **gone**; B-Mobile bubble + specialist strip with authoritative `steps[]` |
+| `done` | Final `ChatResponse` (SSE or legacy JSON) | Composer enabled; pending bubble **gone**; B-Mobile bubble with reply + sources |
 
 | From | Event | To | Trigger |
 |------|-------|----|---------|
 | `idle` | `START` | `running` | Valid **Get help** → `postChat()` starts |
 | `running` | `COMPLETE` | `done` | `postChat` resolves (or abort timeout envelope) |
-| `done` | `RESET` | `idle` | **Start new conversation** (clears thread + specialist strip) |
+| `done` | `RESET` | `idle` | **Start new conversation** (clears thread; FSM → idle) |
 | `done` | `START` | `running` | Follow-up question without reset (allowed) |
 | `running` | `RESET` | `idle` | Start new conversation while in flight (abort + ignore late result) |
 
@@ -268,7 +273,7 @@ Illegal transitions are no-ops. Stage tick **900ms**; first stage label is immed
 |----------|-------|--------|----------|
 | `postChat` | `ChatRequest` (+ optional `AbortSignal`) | `ChatResponse` | Mock latency ~1.8s; Path A/B/C via `selectMockResponse` + seed CSV; does **not** call live `POST /api/chat` |
 
-**Client timeout:** abort wait at **55s** (SAD 50–60s). On abort, still transition `running → done` with an error-shaped `ChatResponse` (`error.code = llm_or_timeout`) and talk-to-a-person CTA. Do not invent an answer.
+**Client timeout (live):** abort wait at **~500s** (`CLIENT_ABORT_MS`). On abort, transition with error-shaped `ChatResponse` (`error.code = llm_or_timeout`) and talk-to-a-person CTA.
 
 **Hook point for Integration:** replace `mockPostChat` behind `lib/api.ts` `postChat` with:
 
@@ -280,15 +285,17 @@ Do **not** reintroduce `startRun` / `getRunStatus` polling. Do **not** use `sear
 
 ## Results
 
-Rendered on the same route. Customer-facing content lives in chat bubbles. The specialist strip binds to the **last `ChatResponse` in UI state** (ADR-14). Do not call `/api/last-result`.
+> **Live:** Customer `/` shows chat bubbles only. HITL pending/approved/denied copy in bubbles. Operator detail on **`/operator`**.
+
+Rendered on the same route. Customer-facing content lives in chat bubbles. Do not call `/api/last-result`.
 
 | Region | Fields | Notes |
 |--------|--------|-------|
-| B-Mobile bubble | `reply`, `sources_used[]`, escalate notice | Sources on resolve; specialist banner only when `shouldShowEscalateNotice()` (not neutral sentiment) |
+| B-Mobile bubble | `reply`, `sources_used[]`, HITL status, escalate notice | Sources on resolve; specialist banner only when `shouldShowEscalateNotice()` (not neutral sentiment) |
 | Pending bubble | Current stage label | **Only** while `phase === "running"` |
 | I'd rather talk to a person | Checkbox + error CTA | Sets `request_human` for the **next** send |
-| For specialists | `decision`, `reason_codes[]`, `steps[]`, `trace_id` | Opens `steps[]` when JSON lands |
-| Packet | `packet`, `stub_ticket_id` | Shown in the strip when escalate; `null` on resolve |
+| `/operator` | approval ref, action, lookup #, deny reason | Read-only projector; not on customer `/` |
+| Packet | `packet`, `stub_ticket_id` | Shown on escalate in chat context; `null` on resolve |
 
 **Demo path expectations (mocked)**
 
@@ -310,7 +317,7 @@ SAD lists **DB/history** as Future Work. This epic implements a **session-only c
 |----------|-----------------|-------------|
 | Storage | In-memory turns for the browser tab | Persistent DB |
 | Append | Each `done` run adds a You + B-Mobile pair | Server-side run log |
-| Start new conversation | Clears thread, specialist strip, FSM → idle | Archive / new ticket |
+| Start new conversation | Clears thread, FSM → idle | Archive / new ticket |
 | Survive refresh | No | Yes |
 | Cross-tab | No | Optional |
 
@@ -323,7 +330,7 @@ SAD lists **DB/history** as Future Work. This epic implements a **session-only c
 | Get help | `postChat()` mock (~1.8s) | `POST ${NEXT_PUBLIC_API_BASE_URL}/api/chat` → one JSON body |
 | Poll / wait | **Removed** | Do **not** add a poller |
 | Last result | UI state (ADR-14) | Same; do not require `/api/last-result` |
-| Timeout | Client abort **55s** | Keep; API soft timeout 45s |
+| Timeout | Client abort **~500s** | Crew 180s + HITL 300s headroom |
 | KB | `GET /api/kb` + `searchKb()` for **demo Path A/B only** | Drop client KB for answers; crew `kb_search` |
 
 Do **not** set `NEXT_PUBLIC_API_BASE_URL` usage in this epic. Mock `GET /api/kb` only reads the seed CSV; it is **not** a product API. If Integration leaves the poller or client KB in the live path, the UI will resolve FAQs the crew never saw.
@@ -498,4 +505,11 @@ Update this table **after every commit** that touches `frontend/` or this file. 
 - **Action**: `sync-docs`
 - **Resolved runtime**: `crewai`
 - **Prompt Trace**: omitted
-- **Notes**: Documented live SSE chat, HITL pending wait (~500s abort), `/operator` projector, Telegram-only Approve/Deny
+- **Notes**: Documented live SSE chat, HITL pending wait (~500s abort), `/operator` projector, Telegram-only Approve/Deny; **removed SpecialistStrip from customer `/`**
+
+### Audit (append)
+
+- **Timestamp**: 2026-08-29T11:20:00-05:00
+- **Persona**: `frontend-eng`
+- **Action**: `sync-docs`
+- **Notes**: Marked pre-Integration Run/Results sections historical; aligned timeout and layout copy with live app
