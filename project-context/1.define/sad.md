@@ -62,7 +62,7 @@ Browser (Next.js) ──POST /api/chat──► FastAPI ──kickoff──► C
 | Tier | In scope |
 |------|----------|
 | **MVP** | Next.js chat + disclosure; FastAPI; CrewAI sequential crew; SQLite FTS5 KB + HITL store; ticket stub; **`/operator`** projector; SSE orchestration progress |
-| **Future (P1/P2)** | Live ticketing, streaming UI, multi-turn clarifier, CSAT dashboard, DB/history, SSO, voice, CRM writes, cloud vector DB, 5th agent, Ollama / OpenAI-compatible local base URL, `high` model tier, API rate limiting |
+| **Future (P1/P2)** | Live ticketing, streaming UI, multi-turn clarifier, CSAT dashboard, DB/history, SSO, voice, CRM writes, cloud vector DB, 5th agent, Ollama / OpenAI-compatible local base URL, `high` model tier, API rate limiting, CrewAI AMP tracing (`crewai login` + `CREWAI_TRACING_ENABLED`), OpenTelemetry / Langfuse / Phoenix APM |
 
 **Explicit exclusions (MVP):** conversation-history database, Zendesk/Intercom live APIs, biometric emotion, horizontal autoscaling, MCP servers, hierarchical CrewAI process, per-agent model env vars, API rate limiting. **In MVP (extensions):** local SQLite demo store (`support.db`) for FTS5 KB + HITL (ADR-20/21); SSE **orchestration** progress (not LLM tokens); Ollama Cloud as an allowed `LLM_PROVIDER`.
 
@@ -534,6 +534,8 @@ project-context/2.build/logs/   # Prompt Trace (runtime)
 
 Chat endpoint is **open for demo**. Optional operator key applies to last-result polish only. **Do not** add per-agent model env vars (`OPENAI_MODEL_CLASSIFIER`, etc.) — tiers only (ADR-19).
 
+**Not MVP (Future Work names only):** `CREWAI_TRACING_ENABLED` (CrewAI AMP dashboard traces; requires crewai 1.x + `crewai login`). Do not treat as required for AC-02c.
+
 ---
 
 ## 4. Quality Attributes
@@ -561,14 +563,22 @@ Scale-out (replicas, shared session store, managed vector DB) is Future Work; MV
 
 ### Observability
 
-| Signal | Mechanism |
-|--------|-----------|
-| Liveness | `GET /health` |
-| Per-run audit | `trace_id` + Prompt Trace JSON under `LOG_DIR` (minimum schema §2) |
-| Pipeline visibility | `steps[]` in API/SSE; StatusLine from SSE `stage` events; **`/operator`** for HITL queue |
-| Escalation rationale | `reason_codes` + packet |
-| Application logs | Structured stdout |
-| Advanced APM / cost dashboards | Deferred (MRD KPIs inform Future Work) |
+**MVP baseline (Phase 1 — locked):** local, self-contained signals only. No CrewAI AMP account, no `crewai login`, no `CREWAI_TRACING_ENABLED`, and no CrewAI 1.x upgrade are required for MVP observability. `write_prompt_trace()` in `backend/chat_service.py` remains the contractual audit artifact (AC-02c, §2 schema).
+
+| Signal | Mechanism | Environment |
+|--------|-----------|-------------|
+| Liveness | `GET /health` | all |
+| Per-run audit | `trace_id` + Prompt Trace JSON under `LOG_DIR` (minimum schema §2; message truncated; no API keys) | all (MVP) |
+| Pipeline visibility | `steps[]` in API/SSE; StatusLine from SSE `stage` events; **`/operator`** for HITL queue | all (MVP) |
+| Escalation rationale | `reason_codes` + packet | all (MVP) |
+| Application logs | Structured stdout (`verbose=True` on crew) | all (MVP) |
+| Framework traces (CrewAI AMP) | `tracing=True` / `CREWAI_TRACING_ENABLED` after `crewai login` and crewai 1.x | Future Work — optional **dev/staging** only |
+| Production APM | OTLP → Langfuse / Phoenix (or equivalent OpenInference backend) | Future Work — **prod** |
+| Token / cost dashboards | AMP or OTel cost metrics (MRD KPIs: token/cost per ticket, retrieval hit rate) | Future Work |
+
+**Phase 1 limitation (accepted for MVP):** Prompt Trace does not capture raw LLM prompts/responses, per-tool I/O, or token counts. Advanced APM remains deferred. Do **not** replace Prompt Trace if AMP or OTel is added later — they complement the audit file; AMP is not required for course AC-02c.
+
+**PII:** Prompt Trace redacts by truncation. If AMP/OTel is later enabled, restrict to non-prod or apply platform PII redaction — traces may include fuller prompts than `{LOG_DIR}` JSON.
 
 ### Security (multi-agent AI)
 
@@ -843,3 +853,15 @@ POST /api/chat
 | Action | sync-docs (reliability table 180s/300s/~500s; failure path; no customer specialist strip) |
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai |
 | Prompt Trace | Omitted |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-09-01T21:17:00-05:00 |
+| Persona id | system-arch |
+| Action | update-sad (observability Phase 1 baseline locked; CrewAI AMP + OTel/Langfuse/Phoenix deferred as Future Work) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Tracing backend | Phase 1 Prompt Trace + SSE + `/health` (no AMP; no `crewai login`) |
+| PII redaction | Prompt Trace message truncated to 200 chars; secrets stay in env only |
+| Prompt Trace | Omitted — architecture write; no secrets |
