@@ -138,7 +138,7 @@ Secrets hygiene and common injection paths (SQLite parameterization, React text 
 
 | ID | Control | Evidence |
 |----|---------|----------|
-| SEC-I01 | Secrets not committed | `.env` gitignored; `git check-ignore` OK; prior `SECURITY_AUDIT.md` aligned |
+| SEC-I01 | Secrets not committed | `.env` gitignored; `git check-ignore` OK |
 | SEC-I02 | Secrets via env only | `llm_config.py`, Telegram token via `os.getenv` |
 | SEC-I03 | SQLite queries parameterized | `tools.py` / `approval_service` use `?` placeholders; FTS via `_fts_escape` quoted tokens |
 | SEC-I04 | CORS allowlist | localhost:3000 / 127.0.0.1:3000 only |
@@ -199,7 +199,7 @@ MVP action: record audit command in Deliver runbook; not a code-change blocker f
 - `project-context/2.build/qa.md`, `backend.md`, `frontend.md`, `integration.md`, `evals.md`
 - `backend/main.py`, `tools.py`, `telegram_bot.py`, `chat_service.py`, `llm_config.py`
 - `frontend/app/api/approvals/[...path]/route.ts`, `ChatWindow.tsx`
-- `.gitignore`, `.env.example`, `SECURITY_AUDIT.md` (prior secrets pass)
+- `.gitignore`, `.env.example`
 - `aamad.config.example.yml` (`security.require_security_assessment: true`)
 
 ## Assumptions
