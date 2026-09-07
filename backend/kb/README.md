@@ -1,16 +1,30 @@
-# B-Mobile seed knowledge base
+# B-Mobile knowledge base — CSV seed vs SQLite live
 
-Canonical export: **`articles.csv`** (one FAQ per row). English, fictional consumer carrier.
+## Clear split (read this first)
 
-Columns: `id`, `title`, `body`. Quote fields that contain commas.
+| | **You edit** | **The app searches** |
+|---|--------------|----------------------|
+| **What** | FAQ text | Full-text index |
+| **Where** | `backend/kb/articles.csv` | `backend/data/support.db` (SQLite **FTS5**) |
+| **When used** | Authoring, git, re-seed | Every live `kb_search` in the crew |
+| **ADR** | Seed/export | **ADR-20** (replaces ADR-13 TF-IDF-over-CSV for live path) |
 
-Live retrieval uses **SQLite FTS5** in `backend/data/support.db` (seeded from this CSV).
+```text
+articles.csv  --seed/migrate-->  support.db (FTS5)  --kb_search-->  grounded passages
+     ^ edit here                      ^ runtime only
+```
+
+- **Do** change FAQs in the CSV, then restart the backend (or run migrate).
+- **Do not** expect chat to read the CSV directly — live chat never opens `articles.csv` for search.
+- **CSV columns:** `id`, `title`, `body` (RFC4180; quote fields with commas). English, fictional B-Mobile carrier.
 
 ```bash
 python -m backend.scripts.migrate_kb_csv_to_sqlite
 ```
 
-The frontend mock `GET /api/kb` still serves this CSV for offline demos. Live chat uses crew `kb_search`.
+`ensure_database()` on API startup also creates/seeds `support.db` from this CSV.
+
+The frontend mock `GET /api/kb` may still read the CSV for offline FE stubs. Live chat uses crew `kb_search` → SQLite only.
 
 **Path A (hit):** `How do I reset my B-Mobile My Account PIN?`  
 **Path B (miss):** `What is your quantum warranty for the hardware drone?`  

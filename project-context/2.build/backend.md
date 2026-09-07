@@ -126,22 +126,23 @@ Nine structured models aligned with SAD §2 contracts:
 
 #### KBSearchTool
 
-**Purpose**: Search the live FAQ corpus in SQLite FTS5 (`backend/data/support.db`), seeded from `backend/kb/articles.csv` (SAD ADR-20). Same `RetrieverOutput` contract as the former TF-IDF tool (ADR-13).
+**Purpose**: Search the **live** FAQ index in SQLite FTS5 (`backend/data/support.db`).  
+**Not** a runtime CSV reader. `backend/kb/articles.csv` is only the authoring/seed file that populates the DB (SAD ADR-20). Former TF-IDF-over-CSV path (ADR-13) is historical.
 
 **Implementation**:
-- Opens `KB_DB_PATH` (created/seeded by `ensure_database()` on startup)
+- Opens `KB_DB_PATH` (created/seeded by `ensure_database()` on startup from the CSV)
 - FTS5 `MATCH` over title + body; AND of content tokens; English stopwords
 - Score `min(1.0, abs(bm25) / 10.0)`; keep passages ≥ `KB_SIMILARITY_FLOOR` (default 0.35)
 - Top-k via `KB_TOP_K` (default 3); `gap=true` if none meet the floor
 
 **Configuration**:
-- `KB_DB_PATH` (default: `backend/data/support.db`)
-- `KB_DIR` / `KB_FILE` (CSV seed; `backend/kb` + `articles.csv`)
+- `KB_DB_PATH` (default: `backend/data/support.db`) — **live**
+- `KB_DIR` / `KB_FILE` (CSV seed only; `backend/kb` + `articles.csv`)
 - `KB_SIMILARITY_FLOOR` (default: `0.35`)
 
 **Output**: JSON string matching `RetrieverOutput` schema
 
-**Re-seed:** `python -m backend.scripts.migrate_kb_csv_to_sqlite`
+**Re-seed:** `python -m backend.scripts.migrate_kb_csv_to_sqlite` (or restart backend)
 
 #### TicketStubTool
 
@@ -287,7 +288,7 @@ All errors return HTTP 200 with error envelope (prefer consistent schema for FE)
 | Error Code | When | Response |
 |------------|------|----------|
 | `llm_or_timeout` | Crew timeout or LLM failure | decision=escalate, minimal packet, reason_codes=["timeout"] |
-| `kb_unavailable` | articles.csv missing/unreadable | decision=escalate, minimal packet, reason_codes=["system_error"] |
+| `kb_unavailable` | SQLite KB missing/unreadable (`support.db` / FTS error) — not “CSV missing at search time” | decision=escalate, minimal packet, reason_codes=["system_error"] |
 | `system_error` | Unexpected exception | decision=escalate, minimal packet, reason_codes=["system_error"] |
 | `validation_error` | Invalid ChatRequest (400 before kickoff) | Optional: prefer same envelope shape when practical |
 
@@ -600,15 +601,18 @@ SQLite-backed queue used by Telegram and the read-only `/operator` page.
 
 ### Manual Testing (Vertical Slice)
 
+Operator runbook (local + Docker Compose): [`RUNNING.md`](../../RUNNING.md). Deliver packaging: [`project-context/3.deliver/deploy.md`](../3.deliver/deploy.md).
+
 **Prerequisites**:
-1. Copy `.env.example` to `.env` and set `OPENAI_API_KEY`
+1. Copy `.env.example` to `.env` and set provider keys (`OLLAMA_API_KEY` or `OPENAI_API_KEY`) plus `OPERATOR_API_KEY`
 2. Install dependencies: `pip install -r backend/requirements.txt`
-3. Verify `backend/kb/articles.csv` exists with 12 rows
+3. Verify `backend/kb/articles.csv` exists with 12 rows (seeds SQLite FTS5 on startup)
 
 **Start Server** (repo root):
 ```bash
 python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
 # Server starts on http://127.0.0.1:8001
+# Or: docker compose up --build  → app at http://127.0.0.1:3000
 ```
 
 **Test Health**:

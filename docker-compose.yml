@@ -1,0 +1,64 @@
+# Optional Week-6 / demo packaging (SAD §3 Physical / Deployment Architecture).
+# Default MVP remains dual local process — see RUNNING.md and deploy.md.
+#
+# Usage (from repo root, with a filled .env — never commit secrets):
+#   docker compose up --build
+#   docker compose down
+#
+# Host binds are localhost-only to reduce accidental LAN exposure (SEC-04/05).
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bmobile-support-backend:0.1.0
+    container_name: bmobile-backend
+    env_file:
+      - .env
+    environment:
+      AAMAD_TARGET_RUNTIME: crewai
+      BACKEND_PORT: "8001"
+      LOG_DIR: project-context/2.build/logs
+      KB_DIR: backend/kb
+      KB_FILE: articles.csv
+      KB_DB_PATH: backend/data/support.db
+      # Container must listen on all interfaces; host publish stays 127.0.0.1
+      # (overrides any HOST hint; uvicorn CMD already uses 0.0.0.0).
+    ports:
+      - "127.0.0.1:8001:8001"
+    volumes:
+      - ./project-context/2.build/logs:/app/project-context/2.build/logs
+      - ./backend/data:/app/backend/data
+      - ./backend/kb:/app/backend/kb:ro
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://backend:8001
+    image: bmobile-support-frontend:0.1.0
+    container_name: bmobile-frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://backend:8001
+      OPERATOR_API_KEY: ${OPERATOR_API_KEY:-}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

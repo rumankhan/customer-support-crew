@@ -1,7 +1,8 @@
 # Backend Implementation Complete ✅
 
-> **Historical snapshot (2026-08-25).** Superseded for day-to-day use by [`project-context/2.build/backend.md`](project-context/2.build/backend.md), [`RUNNING.md`](RUNNING.md), and [`README.md`](README.md).  
-> **Do not use this file for office hours.** Live product uses **SQLite FTS5**, **SSE** `POST /api/chat/stream`, **180s** crew timeout, **300s** HITL wait, and **Telegram** — not “no database”, TF-IDF-only retrieval, or 45s JSON-only chat.
+> **Historical snapshot (2026-08-25).** Superseded for day-to-day use by [`project-context/2.build/backend.md`](project-context/2.build/backend.md), [`RUNNING.md`](RUNNING.md), and [`backend/kb/README.md`](backend/kb/README.md).  
+> **KB today:** live search = **SQLite FTS5** (`support.db`); **CSV is seed only** — ignore TF-IDF / “search articles.csv” bullets below.  
+> **Do not use this file for office hours.** Live product uses **SQLite FTS5**, **SSE** `POST /api/chat/stream`, **180s** crew timeout, **300s** HITL wait, and **Telegram**.
 
 **Date**: August 25, 2026  
 **Persona**: @backend.eng  

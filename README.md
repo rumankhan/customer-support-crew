@@ -5,6 +5,28 @@ It systematizes research-driven planning, modular AI agent workflows, and rapid 
 
 ---
 
+## Running this repository's MVP (B-Mobile Support Crew)
+
+Day-to-day operator guide: **[`RUNNING.md`](RUNNING.md)** (local dual process + Docker Compose).  
+Deliver runbook: **[`project-context/3.deliver/deploy.md`](project-context/3.deliver/deploy.md)**.
+
+| Mode | Open in browser | Backend health |
+|------|-----------------|----------------|
+| Local or Docker Compose | http://127.0.0.1:3000 | http://127.0.0.1:8001/health |
+
+```bash
+# Local (two terminals) — see RUNNING.md
+python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
+cd frontend && npm run dev
+
+# Or packaged demo
+docker compose up --build
+```
+
+Copy `.env.example` → `.env` and `frontend/.env.example` → `frontend/.env.local` before starting. Never commit secrets.
+
+---
+
 ## Table of Contents
 
 - [What is AAMAD?](#what-is-aamad)
@@ -414,8 +436,10 @@ After QA (and preferably security), invoke `@devops.eng`:
 
 - **Release readiness:** Confirm `qa.md` (and note `evals.md` and `security.md` status)
 - **Deploy / CI:** Minimal deploy and pipeline config aligned with SAD and `AAMAD_TARGET_RUNTIME`, incorporating `evals.md`'s Production Monitoring Recommendations (trace fields, dashboards, alert thresholds)
+- **This repo:** `Dockerfile`, `frontend/Dockerfile`, `docker-compose.yml` (localhost publish on `:3000` / `:8001`)
 - **Runbook:** `project-context/3.deliver/deploy.md` (hosting, env matrix, access, rollback)
-- **User docs:** `*document-user-guide` → `project-context/3.deliver/user-guide.md`
+- **How to run:** [`RUNNING.md`](RUNNING.md)
+- **User docs:** `*document-user-guide` → `project-context/3.deliver/user-guide.md` (optional / pending)
 - **Validate:** `aamad validate --phase deliver`
 
 ---

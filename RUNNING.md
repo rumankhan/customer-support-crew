@@ -1,13 +1,67 @@
 # How to Run the Multi-Agent Support Application
 
-Canonical overview of the product: [`README.md`](README.md).
+Canonical overview of the product: [`README.md`](README.md).  
+Full deliver runbook (env matrix, rollback, access control): [`project-context/3.deliver/deploy.md`](project-context/3.deliver/deploy.md).
 
-Run both commands from the **repository root** (the folder that contains `backend/` and `frontend/`). Do not `cd backend` before uvicorn — the module path is `backend.main`.
+Run commands from the **repository root** (the folder that contains `backend/` and `frontend/`), unless a step says otherwise. Do not `cd backend` before uvicorn — the module path is `backend.main`.
 
-## Quick Start
+| Mode | When to use |
+|------|-------------|
+| **Local (default)** | Day-to-day demo and development — two terminals |
+| **Docker Compose** | Packaged demo — `Dockerfile` + `docker-compose.yml` |
+
+Both modes expect ports **3000** (frontend) and **8001** (backend) on localhost.
+
+---
+
+## Prerequisites
+
+| Requirement | Notes |
+|-------------|--------|
+| Python 3.10+ | 3.11 matches the backend Docker image |
+| Node.js ≥ 20 + npm | See `frontend/package.json` `engines` |
+| LLM credentials | Fill `.env` for `LLM_PROVIDER` (`ollama` or `openai`) |
+| Docker Desktop (optional) | Only for Compose |
+
+### First-time setup (local)
+
+```bash
+# From repository root
+python -m venv .venv
+# Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+# macOS / Linux:
+# source .venv/bin/activate
+
+pip install -r backend/requirements.txt
+copy .env.example .env
+# Edit .env — set OLLAMA_API_KEY or OPENAI_API_KEY, OPERATOR_API_KEY, etc.
+# Never commit .env
+
+cd frontend
+npm ci
+copy .env.example .env.local
+# Ensure NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001
+# Use the same OPERATOR_API_KEY as root .env
+cd ..
+```
+
+On macOS/Linux use `cp` instead of `copy`.
+
+SQLite KB is created/seeded automatically when the backend starts (from `backend/kb/articles.csv`). Optional explicit migrate:
+
+```bash
+python -m backend.scripts.migrate_kb_csv_to_sqlite
+```
+
+---
+
+## Quick Start (local)
 
 ### Terminal 1: Backend (FastAPI + CrewAI)
+
 ```bash
+# Activate .venv first if you use one
 python -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
@@ -22,13 +76,14 @@ Telegram manager bot: disabled (set TELEGRAM_ENABLED=true to activate)
 INFO: Application startup complete.
 ```
 
-**Backend URL:** http://127.0.0.1:8001
-**Health check:** http://127.0.0.1:8001/health
+**Backend URL:** http://127.0.0.1:8001  
+**Health check:** http://127.0.0.1:8001/health  
 **API docs:** http://127.0.0.1:8001/docs
 
 ---
 
 ### Terminal 2: Frontend (Next.js)
+
 ```bash
 cd frontend
 npm run dev
@@ -44,20 +99,52 @@ npm run dev
 
 ---
 
+## Quick Start (Docker Compose)
+
+Requires a filled root **`.env`** (from `.env.example`). Compose publishes only on loopback (`127.0.0.1`) to reduce accidental LAN exposure.
+
+Stop any local uvicorn / `npm run dev` on **8001** / **3000** first.
+
+```bash
+# From repository root
+docker compose up --build
+```
+
+| Service | Published URL |
+|---------|----------------|
+| Frontend | http://127.0.0.1:3000 |
+| Backend | http://127.0.0.1:8001 |
+| Health | http://127.0.0.1:8001/health |
+
+Inside the Compose network the frontend proxies to `http://backend:8001` (set at image build time). You still open the app in the browser at **http://127.0.0.1:3000**.
+
+Useful commands:
+
+```bash
+docker compose up --build -d    # detached
+docker compose ps
+docker compose logs -f backend
+docker compose down             # stop containers
+```
+
+Volumes mount Prompt Trace logs (`project-context/2.build/logs`), SQLite data (`backend/data`), and the KB CSV (`backend/kb`, read-only).
+
+---
+
 ## Expected local ports
 
 | Service | URL |
 |---------|-----|
-| Frontend | http://localhost:3000 |
+| Frontend | http://localhost:3000 (or http://127.0.0.1:3000) |
 | Backend | http://127.0.0.1:8001 |
 | Health | http://127.0.0.1:8001/health |
 | Operator projector (read-only) | http://localhost:3000/operator |
 
-If port 8000 is free you may use it, but this repo’s working demo uses **8001**. Set `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001` in `frontend/.env.local` and restart `npm run dev`.
+If port 8000 is free you may use it, but this repo’s working demo uses **8001**. For **local** mode, set `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001` in `frontend/.env.local` and restart `npm run dev`. Compose uses `http://backend:8001` for the FE↔BE link automatically.
 
 ## Access the Application
 
-Open your browser and go to: **http://localhost:3000**
+Open your browser and go to: **http://localhost:3000** (or **http://127.0.0.1:3000** for Compose)
 
 1. Click "I understand" to acknowledge the AI disclosure
 2. Type your question (e.g., "How do I reset my PIN?")
@@ -96,15 +183,23 @@ The UI calls **`/api/chat/stream`** via a Next.js streaming proxy at `frontend/a
 
 ---
 
-## Knowledge base (SQLite)
+## Knowledge base (two layers — do not confuse)
 
-Live retrieval uses SQLite FTS5 at `backend/data/support.db` (seeded from `backend/kb/articles.csv`).
+| Layer | File | Role |
+|-------|------|------|
+| **Live index (what the crew searches)** | `backend/data/support.db` | **SQLite FTS5** — used by `kb_search` at runtime (ADR-20) |
+| **Authoring / seed (what you edit)** | `backend/kb/articles.csv` | Hand-edited FAQs; **not** queried live. Loaded into SQLite on backend start (and via migrate script) |
+
+**Flow:** edit CSV → start backend (or run migrate) → FTS5 index updated → chat retrieval hits SQLite only.
 
 ```bash
+# Optional explicit re-seed (also happens automatically on startup)
 python -m backend.scripts.migrate_kb_csv_to_sqlite
 ```
 
-The database is also created/seeded automatically when the backend starts.
+TF-IDF-over-CSV (ADR-13) is **historical** — superseded for live retrieval. If a doc still says “search articles.csv at runtime,” it is outdated.
+
+Details: [`backend/kb/README.md`](backend/kb/README.md).
 
 ---
 
@@ -247,7 +342,7 @@ Expected: `course_pass: true`, results written to `evals/results/latest.json`.
 
 ### Live run (backend must be up)
 
-Terminal 1 — start the API ([Quick Start](#quick-start)), then:
+Start the API via [Quick Start (local)](#quick-start-local) or [Docker Compose](#quick-start-docker-compose), then:
 
 ```bash
 python -m evals.run --live --base-url http://127.0.0.1:8001
@@ -302,9 +397,17 @@ After changing crew prompts, KB, or guardrails, re-run **fixtures** always and *
 - If port 8000 is in use by Docker/WSL, use 8001 (default in `.env`)
 
 ### Frontend won't start?
-- Check Node version: `node --version` (need 18+)
-- Reinstall dependencies: `npm install` (in frontend/)
+- Check Node version: `node --version` (need **20+**)
+- Reinstall dependencies: `npm ci` or `npm install` (in frontend/)
 - Check port 3000: `netstat -ano | findstr :3000`
+
+### Docker Compose won't start or FE can't reach API?
+- Confirm Docker Desktop is running and `.env` exists at repo root with LLM keys
+- Free ports 3000/8001: stop local uvicorn / `npm run dev` before `docker compose up`
+- FE image is built with `NEXT_PUBLIC_API_BASE_URL=http://backend:8001` — rebuild after changing that arg: `docker compose up --build`
+- Health from host: `curl http://127.0.0.1:8001/health` (or open in a browser)
+- Logs: `docker compose logs -f backend` / `docker compose logs -f frontend`
+- Approvals **503**: set `OPERATOR_API_KEY` in root `.env` (Compose passes it into the frontend service)
 
 ### CrewAI AMP traces not showing?
 - Tracing is on when `CREWAI_TRACING_ENABLED=true` (default) and `Crew(tracing=True)`
@@ -347,4 +450,10 @@ After changing crew prompts, KB, or guardrails, re-run **fixtures** always and *
 
 ## Stopping the Servers
 
-Press **Ctrl+C** in each terminal window to stop the servers.
+**Local:** Press **Ctrl+C** in each terminal (backend and frontend). Ensure only one uvicorn is listening on 8001.
+
+**Compose:**
+
+```bash
+docker compose down
+```
