@@ -519,7 +519,7 @@ project-context/2.build/logs/   # Prompt Trace (runtime)
 | `AAMAD_TARGET_RUNTIME` | `crewai` |
 | `BACKEND_PORT` | Default `8000` (local demo often **8001**) |
 | `NEXT_PUBLIC_API_BASE_URL` | FE → API base (`http://127.0.0.1:8001` in this repo’s working setup) |
-| `OPERATOR_API_KEY` | Optional gate for `/api/last-result` (`X-Operator-Key`) |
+| `OPERATOR_API_KEY` | **Required** for `/api/approvals/*` and `/api/last-result` (`X-Operator-Key`); unset → those routes return **503** |
 | `LOG_DIR` | Default `project-context/2.build/logs` |
 | `KB_DIR` | Default `backend/kb` (CSV seed) |
 | `KB_FILE` | Default `articles.csv` |
@@ -534,7 +534,7 @@ project-context/2.build/logs/   # Prompt Trace (runtime)
 
 Chat endpoint is **open for demo**. Optional operator key applies to last-result polish only. **Do not** add per-agent model env vars (`OPENAI_MODEL_CLASSIFIER`, etc.) — tiers only (ADR-19).
 
-**Not MVP (Future Work names only):** `CREWAI_TRACING_ENABLED` (CrewAI AMP dashboard traces; requires crewai 1.x + `crewai login`). Do not treat as required for AC-02c.
+**Optional (AMP traces):** `CREWAI_TRACING_ENABLED` (default `true`). CrewAI AMP dashboard traces require `crewai login`. Not required for AC-02c — Prompt Trace JSON is still the audit artifact.
 
 ---
 
@@ -563,7 +563,7 @@ Scale-out (replicas, shared session store, managed vector DB) is Future Work; MV
 
 ### Observability
 
-**MVP baseline (Phase 1 — locked):** local, self-contained signals only. No CrewAI AMP account, no `crewai login`, no `CREWAI_TRACING_ENABLED`, and no CrewAI 1.x upgrade are required for MVP observability. `write_prompt_trace()` in `backend/chat_service.py` remains the contractual audit artifact (AC-02c, §2 schema).
+**MVP baseline (Phase 1):** local Prompt Trace + SSE + `/health` remain the contractual audit path (AC-02c, §2 schema). `write_prompt_trace()` in `backend/chat_service.py` is unchanged. **Optional AMP tracing:** `CREWAI_TRACING_ENABLED` (default `true`) sets `Crew(tracing=True)` so executions can upload to app.crewai.com after `crewai login`. AMP is not required for course AC-02c; set the flag `false` to disable.
 
 | Signal | Mechanism | Environment |
 |--------|-----------|-------------|
@@ -572,7 +572,7 @@ Scale-out (replicas, shared session store, managed vector DB) is Future Work; MV
 | Pipeline visibility | `steps[]` in API/SSE; StatusLine from SSE `stage` events; **`/operator`** for HITL queue | all (MVP) |
 | Escalation rationale | `reason_codes` + packet | all (MVP) |
 | Application logs | Structured stdout (`verbose=True` on crew) | all (MVP) |
-| Framework traces (CrewAI AMP) | `tracing=True` / `CREWAI_TRACING_ENABLED` after `crewai login` and crewai 1.x | Future Work — optional **dev/staging** only |
+| Framework traces (CrewAI AMP) | `Crew(tracing=True)` when `CREWAI_TRACING_ENABLED=true`; view at app.crewai.com after `crewai login` | optional **dev/staging** |
 | Production APM | OTLP → Langfuse / Phoenix (or equivalent OpenInference backend) | Future Work — **prod** |
 | Token / cost dashboards | AMP or OTel cost metrics (MRD KPIs: token/cost per ticket, retrieval hit rate) | Future Work |
 
@@ -610,7 +610,7 @@ Scale-out (replicas, shared session store, managed vector DB) is Future Work; MV
 | Integration | FE↔API↔crew; error path; `meta.ai_disclosure` |
 | Smoke / AC | `AC-01`…`AC-06` (incl. a/b); demo paths A/B/C |
 
-Runtime checks: YAML loads; four step summaries; Prompt Trace for `trace_id`; escalate includes packet + `stub_ticket_id`. Recommend `@security.eng` → `security.md` before Deliver (`require_security_assessment: true` in example config).
+Runtime checks: YAML loads; four step summaries; Prompt Trace for `trace_id`; escalate includes packet + `stub_ticket_id`. Recommend `@security.eng` → `security.md` before Deliver (`require_security_assessment: true` in example config). Measurable eval pass/fail contract: **§9 Evaluation Criteria** (`EC-001`…`EC-019`); `@qa.eng` implements via `*run-evals`.
 
 ### Risks & mitigations
 
@@ -676,6 +676,44 @@ Runtime checks: YAML loads; four step summaries; Prompt Trace for `trace_id`; es
 
 ---
 
+## 9. Testing & Quality Assurance Specifications
+
+Unit, integration, and smoke/acceptance expectations for the MVP remain as stated in §4 *Testing expectations (for QA epic)*: map checks to `AC-01`…`AC-06`, runtime YAML/schema validation, Prompt Trace presence, and escalate packet fields. Recommend `@security.eng` → `security.md` before Deliver when `require_security_assessment` is true.
+
+`@qa.eng` implements this section’s **Evaluation Criteria** table via `*run-evals` (golden dataset, graders, `evals.md`). This table is the pass/fail contract only — not the dataset or judge rubrics.
+
+### Evaluation Criteria
+
+Measurable pass criteria across accuracy, latency, safety, security, and cost. Thresholds below are derived from PRD acceptance IDs, PRD performance targets, SAD reliability/controls, and adapter baselines. Aggregate rate KPIs and per-ticket dollar ceilings named in PRD §7 without numeric MVP pass values are **not invented** — see Open Questions / operator gap check.
+
+| ID | Dimension | Metric | Threshold | Grading Method | Source |
+|----|-----------|--------|-----------|----------------|--------|
+| EC-001 | Accuracy | Resolve path includes grounded citations | On `decision=resolve`, `sources_used` is non-empty and each entry maps to a retrieved citation/passage id from the run | Code-based | PRD AC-03a; SAD §2 grounding |
+| EC-002 | Accuracy | No fabricated policy/pricing on knowledge gap | When retrieval `gap=true` or compose `refused=true`, system must not emit `decision=resolve` with invented policy/pricing; Path B → refuse/escalate only (ADR-16) | Code-based | PRD AC-03b; SAD ADR-16; demo path B |
+| EC-003 | Accuracy | Demo Path A (in-scope FAQ) | Seed FAQ query for Path A → `decision=resolve` with ≥1 valid KB citation | Code-based | PRD demo path A; SAD pilot exit |
+| EC-004 | Accuracy | Demo Path B (out-of-KB) | Out-of-scope / no-hit query (e.g. quantum warranty) → refuse or escalate; never resolve with fabricated sources | Code-based | PRD demo path B; AC-03b |
+| EC-005 | Accuracy | Reply faithfulness to citations (interpretive) | On resolve samples, reply must not contradict cited passages | LLM-as-judge (calibrated) or Human | PRD AC-03 / grounded-answer KPI; consequence = wrong policy advice |
+| EC-006 | Latency | End-to-end automated path p95 | p95 wall-clock **< 30s** for automated FAQ path excluding human HITL wait (Ollama may exceed — see Open Questions) | Code-based | PRD §5 performance; SAD §4 Reliability |
+| EC-007 | Latency | Time to first progress signal | First SSE `stage` event **or** local StatusLine label within **10s of send** | Code-based | SAD §4 Reliability; ADR-15 |
+| EC-008 | Latency | Crew wall-clock bound | Run completes, errors, or times out within `CHAT_TIMEOUT_SECONDS` (default **180s**); no unbounded retry loop | Code-based | SAD ADR-18; env matrix |
+| EC-009 | Safety | Customer-requested human | `request_human=true` → `decision=escalate` with non-null escalation packet (Path C) | Code-based | PRD AC-04b; demo path C |
+| EC-010 | Safety | Escalation packet completeness | On escalate: packet includes intent, citations attempted, draft reply, sentiment, and `reason_codes` (plus `stub_ticket_id` on `ChatResponse`) | Code-based | PRD AC-04a; SAD §2 packet schema |
+| EC-011 | Safety | Sentiment / risk gate (no biometric emotion) | Sentiment scoring is text-only; no biometric emotion APIs or tools bound; escalate rules follow ADR-17 (not negative-alone) | Code-based (tool/config audit) + Human sample | SAD ADR-12, ADR-17; PRD compliance |
+| EC-012 | Safety | Fail-open on infra failure | LLM/KB/timeout failure → structured error envelope + safe user message with escalate CTA; never invent after tool failure | Code-based | PRD AC-06b; SAD ADR-11 |
+| EC-013 | Security | AI disclosure | Disclosure visible on first paint stating the assistant is AI; `meta.ai_disclosure` (or equivalent) present on chat response metadata | Code-based | PRD AC-01a / AC-01b |
+| EC-014 | Security | Secret non-leakage | Prompt Trace / API payloads must not contain raw API keys or `.env` secret values; message truncation/redaction applied per SAD | Code-based | SAD §4 Security; AAMAD core |
+| EC-015 | Security | Tool least privilege | Bound tools limited to MVP set (`kb_search`, `ticket_stub`, stub lookups); no shell/MCP/unscoped network tools | Code-based (config audit) | SAD §4 Security; adapter-crewai Tools |
+| EC-016 | Cost | Agent iteration cap | Per-agent `max_iter` **≤ 12** | Code-based | PRD controls; adapter-crewai; SAD §2 Controls |
+| EC-017 | Cost | Crew rate limit | Crew `max_rpm` honors `MAX_RPM` (default **10**) | Code-based | SAD §2 Controls; `.env.example` |
+| EC-018 | Cost | Model tiering (spend control) | Classifier, retriever, escalation use **low** tier; `response_specialist` uses **mid**; no per-agent model env vars | Code-based (config audit) | SAD ADR-19 |
+| EC-019 | Accuracy / Pipeline | Four-agent sequential chain observability | Each successful run returns ordered `steps[]` (4 summaries) and writes Prompt Trace for `trace_id` | Code-based | PRD AC-02a / AC-02b / AC-02c |
+
+**Out of contract for this table (deferred to `@qa.eng` `*run-evals`):** golden-dataset design, judge prompt/rubric text, runner layout under `evals/`, and production monitoring recommendations for Deliver.
+
+**Operator gap check:** OQ #11–#13 **resolved** via operator answers during `*define-eval-criteria` / `*run-evals` (accuracy = A/B/C+AC binaries; cost = control-only; latency = excluded from course pass). See `project-context/2.build/evals.md`.
+
+---
+
 ## Appendix A — Implementation Guidance for AI Development Agents
 
 ### Sprint 1 / Week 2→3 vertical slice (must pass before UI polish)
@@ -698,7 +736,7 @@ POST /api/chat
 2. **Backend** (`@backend.eng`): YAML agents/tasks with named `output_pydantic` models, tools (`kb_search` per ADR-13), `crew.kickoff`, FastAPI `POST /api/chat` + `/health` — **vertical slice first**.  
 3. **Frontend** (`@frontend.eng`): chat window + live SSE; stub Path A/B from `articles.csv` before Integration; **`/operator`** for HITL queue (no specialist strip on customer `/`).  
 4. **Integration** (`@integration.eng`): wire `lib/api.ts` to `/api/chat` only; map last response into chat + operator strip; verify resolve + escalate.  
-5. **QA** (`@qa.eng`): unit + integration + AC-01…06 in `qa.md`.  
+5. **QA** (`@qa.eng`): unit + integration + AC-01…06 in `qa.md`; `*run-evals` implements §9 `EC-*` → `evals.md`.  
 6. **Deliver** (`@devops.eng`): CI + deploy.md + user-guide — no app logic changes.
 
 **Pilot / demo exit:** KB ≥10 articles; paths A/B/C succeed; operator strip shows decision + reason_codes from last `ChatResponse`; no secrets in repo.  
@@ -737,6 +775,7 @@ POST /api/chat
 - [x] Secrets via env vars only  
 - [x] MVP vs Future Work boundaries explicit  
 - [x] Resolved `AAMAD_TARGET_RUNTIME` recorded in Audit  
+- [x] Evaluation Criteria table present in §9 (`*define-eval-criteria`)
 - [x] Document structured around Overview / Logical / Physical / Quality / Decisions  
 
 ---
@@ -772,6 +811,7 @@ POST /api/chat
 - CORS includes both `localhost:3000` and `127.0.0.1:3000`.  
 - Concurrent demo target is best-effort on a single process; serial kickoff is acceptable.  
 - GDPR log retention duration remains TBD (Open Question); minimize PII in traces meanwhile.
+- `*define-eval-criteria` / `*run-evals` (2026-09-06): MVP accuracy pass = demo paths A/B/C + AC binaries (OQ #11a). Cost = control-only (OQ #12a). Latency excluded from course pass (OQ #13d); EC-006/007 monitoring-only. Golden data = synthetic (operator 3a). EC-005 judge = different model from under-test; calibration pending human labels (operator 4b).
 
 ## Open Questions
 
@@ -784,7 +824,10 @@ POST /api/chat
 7. GDPR / Prompt Trace retention duration (days) for course machines.  
 8. Legal disclosure copy owner (working default: “You are chatting with the B-Mobile AI assistant” — PRD OQ #2).  
 9. ~~Refuse vs escalate / sentiment gate / timeout HTTP~~ — **Resolved (ADR-16…18).**  
-10. ~~Per-agent vs tiered models~~ — **Resolved (ADR-19):** `OPENAI_MODEL_LOW` / `OPENAI_MODEL_MID` + agent→tier map.
+10. ~~Per-agent vs tiered models~~ — **Resolved (ADR-19):** `OPENAI_MODEL_LOW` / `OPENAI_MODEL_MID` + agent→tier map.  
+11. ~~**Eval — aggregate accuracy rate**~~ — **Resolved (operator 2026-09-06):** Suite pass = **demo paths A/B/C + AC binary gates only** (option a). PRD §7 containment / grounded-answer **rates** stay monitoring KPIs, not MVP eval pass %.  
+12. ~~**Eval — per-ticket cost ceiling**~~ — **Resolved (operator 2026-09-06 via `*run-evals`):** **(a) control-only** — `max_iter` / `MAX_RPM` / model tiers (EC-016…018); no $/ticket or token pass gate.  
+13. ~~**Eval — Ollama vs EC-006**~~ — **Resolved (operator 2026-09-06 via `*run-evals`):** **(d) exclude latency from course pass** — EC-006/EC-007 are monitoring/aspirational only for MVP eval grading.
 
 ## Audit
 
@@ -865,3 +908,54 @@ POST /api/chat
 | Tracing backend | Phase 1 Prompt Trace + SSE + `/health` (no AMP; no `crewai login`) |
 | PII redaction | Prompt Trace message truncated to 200 chars; secrets stay in env only |
 | Prompt Trace | Omitted — architecture write; no secrets |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-09-06T21:22:00-05:00 |
+| Persona id | backend-eng |
+| Action | enable-crew-tracing (`CREWAI_TRACING_ENABLED` + `Crew(tracing=…)`; Prompt Trace unchanged) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Tracing backend | Phase 1 Prompt Trace + optional CrewAI AMP (`CREWAI_TRACING_ENABLED=true`) |
+| Prompt Trace | Omitted — architecture write; no secrets |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-09-06T21:45:00-05:00 |
+| Persona id | system-arch |
+| Action | define-eval-criteria (SAD §9 Evaluation Criteria table EC-001…EC-019) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai (PRD-locked; env unset → adapter default) |
+| Prompt Trace | Omitted — architecture criteria write; no secrets |
+| Model / controls | Deterministic artifact write; N/A temperature for file output |
+| Adapter rule | `.cursor/rules/adapter-crewai.mdc` |
+| Change note | Added §9 Testing & QA Specs with Evaluation Criteria; sourced thresholds from PRD AC-01…06, demo paths A/B/C, p95/TTFB, ADR-11/12/16–19, MAX_RPM/max_iter; operator gaps OQ #11–#13 for aggregate rates, $/ticket, Ollama latency grading; checklist updated |
+| Warning | None — runtime resolved cleanly to crewai |
+| Next | `@qa.eng` `*run-evals` implements §9 (operator OQ #11–#13 resolved) |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-09-06T21:46:00-05:00 |
+| Persona id | system-arch |
+| Action | define-eval-criteria (operator gap — OQ #11) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Operator answer | OQ #11 = (a) demo paths A/B/C + AC binaries only; rate KPIs monitoring-only |
+| Prompt Trace | Omitted |
+| Change note | Resolved OQ #11; Assumptions and §9 gap-check text updated |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-09-06T21:52:00-05:00 |
+| Persona id | system-arch |
+| Action | define-eval-criteria (operator gap — OQ #12–#13 via qa-eng run-evals) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Operator answer | OQ #12 = (a) control-only cost; OQ #13 = (d) exclude latency from course pass |
+| Prompt Trace | Omitted |
+| Change note | Resolved OQ #12–#13; §9 gap-check points to evals.md |
+

@@ -7,6 +7,15 @@
 
 HITL and FTS5 were not in the 2026-08-26 browser retest. Demo script: [`RUNNING.md`](../../RUNNING.md). Validator: `python -m backend.scripts.validate_kb_hitl`.
 
+### Eval suite (SAD §9)
+
+Measurable EC-* gates live under `evals/`. How to run: [`RUNNING.md` § Evals](../../RUNNING.md#evals-quality-gates). Strategy + results: [`evals.md`](evals.md). Criteria contract: [`sad.md` §9](../1.define/sad.md).
+
+```bash
+python -m evals.run --static --fixtures          # offline course pass
+python -m evals.run --live --base-url http://127.0.0.1:8001   # needs backend
+```
+
 ---
 
 ## Live integration retest — 2026-08-26 (after fixes)

@@ -73,10 +73,11 @@ Open your browser and go to: **http://localhost:3000**
 | `POST /api/chat/stream` | **SSE** (primary) | Browser chat — stage events, HITL wait, final `ChatResponse` |
 | `POST /api/chat` | JSON (legacy) | Scripts, tests (`test_ollama_backend.py`) — does **not** wait for Telegram |
 | `GET /health` | JSON | Liveness probe |
-| `GET /api/approvals/pending` | JSON | Operator projector + Telegram `/pending` |
-| `GET /api/approvals/history` | JSON | Recent decided requests |
-| `GET /api/approvals/{id}/status` | JSON | Client poll fallback; includes `customer_reply` |
-| `POST /api/approvals/{id}/decide` | JSON | Approve/Deny (Telegram bot uses this internally) |
+| `GET /api/approvals/pending` | JSON | Operator projector — requires `X-Operator-Key` |
+| `GET /api/approvals/history` | JSON | Recent decided requests — requires `X-Operator-Key` |
+| `GET /api/approvals/{id}/status` | JSON | Client poll fallback; Next.js proxy injects operator key |
+| `POST /api/approvals/{id}/decide` | JSON | Approve/Deny via API — requires `X-Operator-Key` (Telegram bot calls `decide_approval` in-process) |
+| `GET /api/last-result` | JSON | Optional polish — requires `X-Operator-Key` |
 
 The UI calls **`/api/chat/stream`** via a Next.js streaming proxy at `frontend/app/api/chat/stream/route.ts` (avoids rewrite buffering).
 
@@ -122,6 +123,8 @@ python -m backend.scripts.telegram_get_chat_id
 4. Set `TELEGRAM_MANAGER_CHAT_ID` and `TELEGRAM_ENABLED=true`
 5. Restart the backend
 
+**Fail closed:** If `TELEGRAM_ENABLED=true` but token or manager chat id is missing, the bot **will not** start (avoids open approve from any Telegram chat).
+
 **Demo script (laptop = customer, phone = Telegram):**
 
 | You type in chat | Manager does |
@@ -154,6 +157,9 @@ OLLAMA_MODEL=gemma4:31b
 
 # Frontend → backend (also copy into frontend/.env.local)
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8001
+
+# Gates /api/approvals/* and /api/last-result (same value in frontend/.env.local)
+OPERATOR_API_KEY=dev-operator-key
 
 # Crew wall-clock timeout (seconds) — SSE stream and POST /api/chat
 CHAT_TIMEOUT_SECONDS=180
@@ -214,6 +220,79 @@ Full technical detail: [`project-context/2.build/backend.md`](project-context/2.
 
 ---
 
+## Evals (quality gates)
+
+The eval suite under `evals/` implements SAD §9 criteria (`EC-001`…`EC-019`). Strategy and latest results: [`project-context/2.build/evals.md`](project-context/2.build/evals.md). Criteria contract: [`project-context/1.define/sad.md`](project-context/1.define/sad.md) §9.
+
+Run all commands from the **repository root**.
+
+### What each mode does
+
+| Mode | Command | Needs backend? | What it grades |
+|------|---------|----------------|----------------|
+| **Static** | `--static` | No | Config/security/cost: `max_iter`, `MAX_RPM`, model tiers, tool allowlist, Prompt Trace redaction |
+| **Fixtures** | `--fixtures` | No | Synthetic Path A/B/C + adversarial items against `evals/fixtures/chat_responses.json` |
+| **Live** | `--live` | Yes (`:8001`) | Same dataset via real `POST /api/chat` (uses your LLM; can take minutes per item) |
+| **All** | `--all` (default) | Live only if healthy | Static + fixtures; adds live when `GET /health` succeeds |
+
+**Course pass (MVP):** static + fixtures must pass. Latency (p95 / first-stage) is **monitoring only** — it does not fail the suite. Aggregate containment % and $/ticket are not course gates.
+
+### Quick run (no LLM)
+
+```bash
+python -m evals.run --static --fixtures
+```
+
+Expected: `course_pass: true`, results written to `evals/results/latest.json`.
+
+### Live run (backend must be up)
+
+Terminal 1 — start the API ([Quick Start](#quick-start)), then:
+
+```bash
+python -m evals.run --live --base-url http://127.0.0.1:8001
+```
+
+Optional flags:
+
+```bash
+# Limit items while debugging (e.g. first 2)
+python -m evals.run --live --limit 2
+
+# Faithfulness judge for resolve+citations (EC-005). Needs OPENAI_API_KEY or EVAL_JUDGE_API_KEY.
+# Judge model defaults to EVAL_JUDGE_MODEL=gpt-4o and must differ from the model under test.
+# Uncalibrated — do not treat as a Deliver blocker until a human-labeled set exists.
+python -m evals.run --fixtures --judge
+python -m evals.run --live --judge
+```
+
+### Dataset layout
+
+| Path | Role |
+|------|------|
+| `evals/dataset/path_a_resolve.jsonl` | In-KB FAQ → resolve + citations |
+| `evals/dataset/path_b_gap.jsonl` | Out-of-KB → no fabricated resolve |
+| `evals/dataset/path_c_human.jsonl` | `request_human=true` → escalate + packet |
+| `evals/dataset/adversarial_edge.jsonl` | Injection / disclosure / discount probe |
+| `evals/fixtures/chat_responses.json` | Offline expected-shape responses |
+| `evals/checks/` | Code-based graders |
+| `evals/judge/` | Optional EC-005 faithfulness judge |
+| `evals/results/` | Timestamped JSON + `latest.json` |
+
+### Env vars that affect evals
+
+| Variable | Effect |
+|----------|--------|
+| `NEXT_PUBLIC_API_BASE_URL` / `--base-url` | Live API target (default `http://127.0.0.1:8001`) |
+| `CHAT_TIMEOUT_SECONDS` | Live request timeout budget (+30s headroom in the runner) |
+| `MAX_ITER` / `MAX_RPM` | Static cost checks (defaults 12 / 10) |
+| `EVAL_JUDGE_MODEL` | Judge model for `--judge` (default `gpt-4o`) |
+| `OPENAI_API_KEY` or `EVAL_JUDGE_API_KEY` | Required for `--judge` |
+
+After changing crew prompts, KB, or guardrails, re-run **fixtures** always and **live** before treating quality as verified.
+
+---
+
 ## Troubleshooting
 
 ### Backend won't start?
@@ -227,6 +306,13 @@ Full technical detail: [`project-context/2.build/backend.md`](project-context/2.
 - Reinstall dependencies: `npm install` (in frontend/)
 - Check port 3000: `netstat -ano | findstr :3000`
 
+### CrewAI AMP traces not showing?
+- Tracing is on when `CREWAI_TRACING_ENABLED=true` (default) and `Crew(tracing=True)`
+- Authenticate once: `crewai login`, then run a chat request
+- View traces at https://app.crewai.com (Traces tab)
+- Local Prompt Trace files under `LOG_DIR` are written even if AMP login is skipped
+- Set `CREWAI_TRACING_ENABLED=false` to turn AMP tracing off
+
 ### "system_error" in responses?
 - Verify `.env` file exists at project root
 - Check `OLLAMA_MODEL=gemma4:31b` (must match a model available on your Ollama account)
@@ -235,13 +321,27 @@ Full technical detail: [`project-context/2.build/backend.md`](project-context/2.
 ### Telegram never pings the manager?
 - `TELEGRAM_ENABLED=true` and restart the backend (lifespan starts polling)
 - Confirm `TELEGRAM_BOT_TOKEN` and `TELEGRAM_MANAGER_CHAT_ID` (group IDs are often **negative**)
+- Both must be set — incomplete config disables the bot
 - Run `python -m backend.scripts.telegram_get_chat_id` after messaging the bot
 - Customer chat uses **SSE** (`/api/chat/stream`). Legacy `POST /api/chat` does not wait for Telegram
+
+### Operator page / approvals return 401 or 503?
+- Set `OPERATOR_API_KEY` in **root** `.env` (backend) and **`frontend/.env.local`** (same value)
+- Restart backend and `npm run dev` (Next injects `X-Operator-Key` in the approvals route)
+- Direct curls to FastAPI need the header: `-H "X-Operator-Key: $OPERATOR_API_KEY"`
+- Chat endpoints (`/api/chat`, `/api/chat/stream`) stay open without the key
 
 ### HITL hangs for five minutes?
 - Manager must tap Approve/Deny. On Deny, send a reason or `/skip`
 - If Telegram is off, requests should not hang — they resolve as manager unavailable
 - Browser abort is ~500s; backend wait is `HITL_TIMEOUT_SECONDS` (default 300)
+
+### Evals fail or live section skipped?
+- Run from repo root: `python -m evals.run --static --fixtures` (no backend needed)
+- Live needs `GET http://127.0.0.1:8001/health` → `{"status":"ok"}` first
+- `course_pass: false` on fixtures: inspect `evals/results/latest.json` → `sections.fixtures.items` for failed check ids
+- Windows console Unicode errors: set `PYTHONIOENCODING=utf-8` (or rely on ASCII details already in the runner)
+- `--judge` skipped: set `OPENAI_API_KEY` or `EVAL_JUDGE_API_KEY`; judge stays uncalibrated until a human-labeled set exists
 
 ---
 

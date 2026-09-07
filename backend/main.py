@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -30,6 +30,7 @@ from backend.models import (
     ErrorDetail,
 )
 from backend.crew import CustomerSupportCrew
+from backend.auth import require_operator_key
 from backend.chat_service import (
     DEFAULT_TIMEOUT_SECONDS,
     error_response,
@@ -56,14 +57,27 @@ async def lifespan(app: FastAPI):
     print("Crew initialized:")
     print(f"  Provider: {crew_instance.llm_provider}")
     print(f"  Model: {crew_instance.model_low}")
+    print(f"  Tracing: {'enabled' if crew_instance.tracing_enabled else 'disabled'}")
 
     from backend.telegram_bot import is_enabled, run_polling
+    from backend.auth import get_operator_api_key
+
+    if get_operator_api_key():
+        print("Operator API key: configured (approvals + last-result gated)")
+    else:
+        print(
+            "WARNING: OPERATOR_API_KEY unset — "
+            "/api/approvals/* and /api/last-result will return 503"
+        )
 
     if is_enabled():
         _telegram_task = asyncio.create_task(run_polling())
         print("Telegram manager bot: polling started")
     else:
-        print("Telegram manager bot: disabled (set TELEGRAM_ENABLED=true to activate)")
+        print(
+            "Telegram manager bot: disabled "
+            "(set TELEGRAM_ENABLED=true with BOT_TOKEN + MANAGER_CHAT_ID)"
+        )
 
     yield
 
@@ -238,19 +252,31 @@ async def chat_stream(request: ChatRequest):
     return EventSourceResponse(chat_stream_events(crew_instance, request))
 
 
-@app.get("/api/approvals/pending", response_model=List[ApprovalRequest])
+@app.get(
+    "/api/approvals/pending",
+    response_model=List[ApprovalRequest],
+    dependencies=[Depends(require_operator_key)],
+)
 async def approvals_pending():
     from backend.approval_service import list_pending
     return list_pending()
 
 
-@app.get("/api/approvals/history", response_model=List[ApprovalRequest])
+@app.get(
+    "/api/approvals/history",
+    response_model=List[ApprovalRequest],
+    dependencies=[Depends(require_operator_key)],
+)
 async def approvals_history():
     from backend.approval_service import list_history
     return list_history(10)
 
 
-@app.get("/api/approvals/{approval_id}/status", response_model=ApprovalStatusResponse)
+@app.get(
+    "/api/approvals/{approval_id}/status",
+    response_model=ApprovalStatusResponse,
+    dependencies=[Depends(require_operator_key)],
+)
 async def approval_status(approval_id: str):
     from backend.approval_service import customer_reply_for, get_approval
     row = get_approval(approval_id)
@@ -265,9 +291,13 @@ async def approval_status(approval_id: str):
     )
 
 
-@app.post("/api/approvals/{approval_id}/decide", response_model=ApprovalRequest)
+@app.post(
+    "/api/approvals/{approval_id}/decide",
+    response_model=ApprovalRequest,
+    dependencies=[Depends(require_operator_key)],
+)
 async def approval_decide(approval_id: str, body: ApprovalDecisionRequest):
-    """Internal/demo decide endpoint (Telegram is the primary manager console)."""
+    """Operator decide endpoint (Telegram remains the primary manager console)."""
     from backend.approval_service import decide_approval, get_approval
     updated = decide_approval(
         approval_id,
@@ -286,7 +316,11 @@ async def approval_decide(approval_id: str, body: ApprovalDecisionRequest):
     return row
 
 
-@app.get("/api/last-result", response_model=ChatResponse)
+@app.get(
+    "/api/last-result",
+    response_model=ChatResponse,
+    dependencies=[Depends(require_operator_key)],
+)
 async def get_last_result():
     global last_result
     if not last_result:
@@ -297,5 +331,6 @@ async def get_last_result():
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("BACKEND_PORT", "8000"))
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=port, reload=True)
+    port = int(os.getenv("BACKEND_PORT", "8001"))
+    # Localhost only — do not bind 0.0.0.0 (SEC-05)
+    uvicorn.run("backend.main:app", host="127.0.0.1", port=port, reload=True)

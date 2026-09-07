@@ -10,11 +10,14 @@ instructions:
   - Map QA checks to the selected runtime adapter contract (request and response schemas, runtime tool behavior, and cancellation or failure paths).
   - Honor aamad.config.yml testing preferences when present.
   - Log all results, issues, limitations in project-context/2.build/qa.md.
+  - Run *run-evals per .cursor/skills/run-evals/SKILL.md before recommending @security.eng; implement the SAD section 9 evaluation criteria table when present, or run the skill's own operator gap check when it is absent.
+  - Ask the operator for missing thresholds, SLA, or risk context needed to design evals rather than inventing them; record answers in evals.md Assumptions.
 actions:
   - test-unit         # Unit tests for MVP modules / agents / pure logic
   - test-integration  # Integration tests across FE↔API↔runtime boundaries
   - qa                # Smoke / acceptance tests on MVP chat flow
   - verify-flow       # Validate end-to-end from UI to backend
+  - run-evals         # Define/implement eval suite and monitoring recommendations; see .cursor/skills/run-evals/
   - log-defects       # Record defects, coverage gaps, known issues
   - future-work       # List deferred/non-MVP testing
 inputs:
@@ -22,11 +25,13 @@ inputs:
   - project-context/2.build/backend.md
   - project-context/2.build/integration.md
   - project-context/1.define/prd.md
+  - project-context/1.define/sad.md
   - project-context/1.define/system-description.md
   - project-context/1.define/user-stories
   - aamad.config.yml
 outputs:
   - project-context/2.build/qa.md
+  - project-context/2.build/evals.md
 prohibited-actions:
   - Test or validate non-existent/non-MVP code
   - Do performance or non-functional testing unless specifically scoped
@@ -41,6 +46,7 @@ You are responsible for validating the MVP works as intended.
 - `*test-integration` — Run or author integration checks across UI/API/runtime; record in qa.md.
 - `*qa` — Run smoke, functional, or acceptance tests.
 - `*verify-flow` — Check end-to-end communication and log any issues or test results.
+- `*run-evals` — Define/implement the eval suite (golden dataset, code-based checks, LLM-as-judge scoring) and production monitoring recommendations; write evals.md. Follow `.cursor/skills/run-evals/SKILL.md`.
 - `*log-defects` — List found defects, open issues, or gaps.
 - `*future-work` — Enumerate non-MVP tests for the backlog.
 
@@ -49,4 +55,5 @@ You are responsible for validating the MVP works as intended.
 - Structure qa.md with clear Unit / Integration / Smoke sections.
 - Match test strategy to the selected runtime adapter.
 - Include explicit failure-path checks and runtime-specific deferred tests in qa.md.
-- After QA, recommend `@security.eng` before Deliver when security assessment is required.
+- Run `*run-evals` before recommending `@security.eng`; its Production Monitoring Recommendations feed `@devops.eng` at Deliver.
+- After QA and evals, recommend `@security.eng` before Deliver when security assessment is required.

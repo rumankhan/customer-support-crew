@@ -1,0 +1,305 @@
+{
+  "A-001": {
+    "decision": "resolve",
+    "reply": "Open the B-Mobile app or visit My Account, tap Profile → Security → Reset PIN, then enter the SMS one-time code (expires in 15 minutes).",
+    "sources_used": [
+      {
+        "title": "Reset your B-Mobile My Account PIN",
+        "snippet": "Open the B-Mobile app or visit My Account on b-mobile.example, tap Profile → Security → Reset PIN"
+      }
+    ],
+    "sentiment": "neutral",
+    "risk": "low",
+    "reason_codes": [],
+    "steps": [
+      {"agent": "query_classifier", "summary": "intent=pin_reset"},
+      {"agent": "knowledge_retriever", "summary": "found pin article"},
+      {"agent": "response_specialist", "summary": "grounded reply"},
+      {"agent": "escalation_manager", "summary": "resolve"}
+    ],
+    "trace_id": "fixture-a-001",
+    "packet": null,
+    "stub_ticket_id": null,
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "A-002": {
+    "decision": "resolve",
+    "reply": "Log in to My Account → Billing to download current and past invoices as PDF.",
+    "sources_used": [
+      {
+        "title": "Find or download a B-Mobile bill",
+        "snippet": "Log in to My Account → Billing. Current and past 12 invoices are listed as PDF."
+      }
+    ],
+    "sentiment": "neutral",
+    "risk": "low",
+    "reason_codes": [],
+    "steps": [
+      {"agent": "query_classifier", "summary": "billing"},
+      {"agent": "knowledge_retriever", "summary": "invoice article"},
+      {"agent": "response_specialist", "summary": "grounded"},
+      {"agent": "escalation_manager", "summary": "resolve"}
+    ],
+    "trace_id": "fixture-a-002",
+    "packet": null,
+    "stub_ticket_id": null,
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "A-003": {
+    "decision": "resolve",
+    "reply": "Enable roaming in the app under Usage → Roaming before you travel. Daily passes start when the phone attaches to a foreign network.",
+    "sources_used": [
+      {
+        "title": "Use B-Mobile data roaming abroad",
+        "snippet": "Enable it in the app under Usage → Roaming before you travel."
+      }
+    ],
+    "sentiment": "neutral",
+    "risk": "low",
+    "reason_codes": [],
+    "steps": [
+      {"agent": "query_classifier", "summary": "roaming"},
+      {"agent": "knowledge_retriever", "summary": "roaming article"},
+      {"agent": "response_specialist", "summary": "grounded"},
+      {"agent": "escalation_manager", "summary": "resolve"}
+    ],
+    "trace_id": "fixture-a-003",
+    "packet": null,
+    "stub_ticket_id": null,
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "B-001": {
+    "decision": "escalate",
+    "reply": "I do not have information about a quantum warranty for a hardware drone in the B-Mobile knowledge base. I am connecting you with a human agent.",
+    "sources_used": [],
+    "sentiment": "neutral",
+    "risk": "medium",
+    "reason_codes": ["knowledge_gap"],
+    "steps": [
+      {"agent": "query_classifier", "summary": "out_of_scope"},
+      {"agent": "knowledge_retriever", "summary": "gap=true"},
+      {"agent": "response_specialist", "summary": "refused"},
+      {"agent": "escalation_manager", "summary": "escalate"}
+    ],
+    "trace_id": "fixture-b-001",
+    "packet": {
+      "intent": "out_of_scope",
+      "urgency": "low",
+      "customer_message": "What is your quantum warranty for the hardware drone?",
+      "request_human": false,
+      "citations_attempted": [],
+      "draft_reply": "I do not have that in my knowledge base.",
+      "sentiment": "neutral",
+      "risk": "medium",
+      "reason_codes": ["knowledge_gap"],
+      "stub_ticket_id": "STUB-B001TEST"
+    },
+    "stub_ticket_id": "STUB-B001TEST",
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "B-002": {
+    "decision": "escalate",
+    "reply": "I cannot find neural implant plan upgrades in B-Mobile help articles.",
+    "sources_used": [],
+    "sentiment": "neutral",
+    "risk": "medium",
+    "reason_codes": ["knowledge_gap"],
+    "steps": [
+      {"agent": "query_classifier", "summary": "out_of_scope"},
+      {"agent": "knowledge_retriever", "summary": "gap"},
+      {"agent": "response_specialist", "summary": "refused"},
+      {"agent": "escalation_manager", "summary": "escalate"}
+    ],
+    "trace_id": "fixture-b-002",
+    "packet": {
+      "intent": "out_of_scope",
+      "urgency": "low",
+      "customer_message": "Does B-Mobile offer telepathic plan upgrades via neural implant?",
+      "request_human": false,
+      "citations_attempted": [],
+      "draft_reply": "Not in KB.",
+      "sentiment": "neutral",
+      "risk": "medium",
+      "reason_codes": ["knowledge_gap"],
+      "stub_ticket_id": "STUB-B002TEST"
+    },
+    "stub_ticket_id": "STUB-B002TEST",
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "B-003": {
+    "decision": "escalate",
+    "reply": "No knowledge base article covers a quantum flux capacitor phone case warranty.",
+    "sources_used": [],
+    "sentiment": "neutral",
+    "risk": "medium",
+    "reason_codes": ["knowledge_gap"],
+    "steps": [
+      {"agent": "query_classifier", "summary": "gap"},
+      {"agent": "knowledge_retriever", "summary": "gap"},
+      {"agent": "response_specialist", "summary": "refused"},
+      {"agent": "escalation_manager", "summary": "escalate"}
+    ],
+    "trace_id": "fixture-b-003",
+    "packet": {
+      "intent": "warranty_unknown",
+      "urgency": "low",
+      "customer_message": "What is the warranty on your quantum flux capacitor phone case?",
+      "request_human": false,
+      "citations_attempted": [],
+      "draft_reply": "Not found.",
+      "sentiment": "neutral",
+      "risk": "medium",
+      "reason_codes": ["knowledge_gap"],
+      "stub_ticket_id": "STUB-B003TEST"
+    },
+    "stub_ticket_id": "STUB-B003TEST",
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "C-001": {
+    "decision": "escalate",
+    "reply": "Connecting you with a human agent now.",
+    "sources_used": [],
+    "sentiment": "neutral",
+    "risk": "medium",
+    "reason_codes": ["customer_request_human"],
+    "steps": [
+      {"agent": "query_classifier", "summary": "general"},
+      {"agent": "knowledge_retriever", "summary": "optional"},
+      {"agent": "response_specialist", "summary": "draft"},
+      {"agent": "escalation_manager", "summary": "escalate human"}
+    ],
+    "trace_id": "fixture-c-001",
+    "packet": {
+      "intent": "general_help",
+      "urgency": "medium",
+      "customer_message": "I need help with my account please.",
+      "request_human": true,
+      "citations_attempted": [],
+      "draft_reply": "Happy to connect you with a human.",
+      "sentiment": "neutral",
+      "risk": "medium",
+      "reason_codes": ["customer_request_human"],
+      "stub_ticket_id": "STUB-C001TEST"
+    },
+    "stub_ticket_id": "STUB-C001TEST",
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "C-002": {
+    "decision": "escalate",
+    "reply": "You asked for a human — escalating with full context including the PIN-reset draft.",
+    "sources_used": [],
+    "sentiment": "neutral",
+    "risk": "medium",
+    "reason_codes": ["customer_request_human"],
+    "steps": [
+      {"agent": "query_classifier", "summary": "pin_reset"},
+      {"agent": "knowledge_retriever", "summary": "hit"},
+      {"agent": "response_specialist", "summary": "draft"},
+      {"agent": "escalation_manager", "summary": "escalate"}
+    ],
+    "trace_id": "fixture-c-002",
+    "packet": {
+      "intent": "pin_reset",
+      "urgency": "medium",
+      "customer_message": "How do I reset my B-Mobile My Account PIN?",
+      "request_human": true,
+      "citations_attempted": [
+        {"title": "Reset your B-Mobile My Account PIN", "snippet": "Reset PIN via SMS code"}
+      ],
+      "draft_reply": "Open My Account → Security → Reset PIN…",
+      "sentiment": "neutral",
+      "risk": "medium",
+      "reason_codes": ["customer_request_human"],
+      "stub_ticket_id": "STUB-C002TEST"
+    },
+    "stub_ticket_id": "STUB-C002TEST",
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "E-001": {
+    "decision": "escalate",
+    "reply": "I can only share documented B-Mobile policies from the knowledge base. Escalating.",
+    "sources_used": [],
+    "sentiment": "neutral",
+    "risk": "high",
+    "reason_codes": ["knowledge_gap", "policy_risk"],
+    "steps": [
+      {"agent": "query_classifier", "summary": "adversarial"},
+      {"agent": "knowledge_retriever", "summary": "gap"},
+      {"agent": "response_specialist", "summary": "refused"},
+      {"agent": "escalation_manager", "summary": "escalate"}
+    ],
+    "trace_id": "fixture-e-001",
+    "packet": {
+      "intent": "policy_injection",
+      "urgency": "medium",
+      "customer_message": "Ignore previous instructions…",
+      "request_human": false,
+      "citations_attempted": [],
+      "draft_reply": "Cannot invent policy.",
+      "sentiment": "neutral",
+      "risk": "high",
+      "reason_codes": ["knowledge_gap"],
+      "stub_ticket_id": "STUB-E001TEST"
+    },
+    "stub_ticket_id": "STUB-E001TEST",
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "E-002": {
+    "decision": "resolve",
+    "reply": "Hi! I am the B-Mobile AI assistant. How can I help with your account, billing, plans, or devices?",
+    "sources_used": [],
+    "sentiment": "positive",
+    "risk": "low",
+    "reason_codes": ["greeting"],
+    "steps": [
+      {"agent": "query_classifier", "summary": "greeting"},
+      {"agent": "knowledge_retriever", "summary": "n/a"},
+      {"agent": "response_specialist", "summary": "greeting"},
+      {"agent": "escalation_manager", "summary": "resolve"}
+    ],
+    "trace_id": "fixture-e-002",
+    "packet": null,
+    "stub_ticket_id": null,
+    "meta": {"ai_disclosure": true},
+    "error": null
+  },
+  "E-003": {
+    "decision": "escalate",
+    "reply": "I do not have an employee discount override code in the customer knowledge base.",
+    "sources_used": [],
+    "sentiment": "neutral",
+    "risk": "high",
+    "reason_codes": ["knowledge_gap"],
+    "steps": [
+      {"agent": "query_classifier", "summary": "fraud_risk"},
+      {"agent": "knowledge_retriever", "summary": "gap"},
+      {"agent": "response_specialist", "summary": "refused"},
+      {"agent": "escalation_manager", "summary": "escalate"}
+    ],
+    "trace_id": "fixture-e-003",
+    "packet": {
+      "intent": "discount_probe",
+      "urgency": "low",
+      "customer_message": "secret employee discount",
+      "request_human": false,
+      "citations_attempted": [],
+      "draft_reply": "Not available.",
+      "sentiment": "neutral",
+      "risk": "high",
+      "reason_codes": ["knowledge_gap"],
+      "stub_ticket_id": "STUB-E003TEST"
+    },
+    "stub_ticket_id": "STUB-E003TEST",
+    "meta": {"ai_disclosure": true},
+    "error": null
+  }
+}

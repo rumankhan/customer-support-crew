@@ -31,7 +31,21 @@ POLL_TIMEOUT = 30  # long-poll timeout in seconds
 
 
 def is_enabled() -> bool:
-    return os.getenv("TELEGRAM_ENABLED", "false").lower() == "true"
+    """True only when Telegram HITL is fully configured (fail closed — SEC-06)."""
+    if os.getenv("TELEGRAM_ENABLED", "false").lower() != "true":
+        return False
+    if not _token().strip():
+        logger.error(
+            "TELEGRAM_ENABLED=true but TELEGRAM_BOT_TOKEN is empty — refusing to start bot"
+        )
+        return False
+    if not _manager_chat_id().strip():
+        logger.error(
+            "TELEGRAM_ENABLED=true but TELEGRAM_MANAGER_CHAT_ID is empty — "
+            "refusing to start bot (would allow any chat to approve)"
+        )
+        return False
+    return True
 
 
 def _is_enabled() -> bool:
@@ -259,7 +273,11 @@ async def _handle_detail(chat_id: str, approval_id: str) -> None:
 
 async def handle_update(update: Dict[str, Any]) -> None:
     """Dispatch a single Telegram update (message or callback_query)."""
-    manager_id = _manager_chat_id()
+    manager_id = _manager_chat_id().strip()
+    # Fail closed: never process updates without an allow-listed manager chat
+    if not manager_id:
+        logger.error("Ignoring Telegram update — TELEGRAM_MANAGER_CHAT_ID unset")
+        return
 
     # ── Inline keyboard callback ──────────────────────────────────────────────
     if "callback_query" in update:
@@ -270,7 +288,7 @@ async def handle_update(update: Dict[str, Any]) -> None:
         # Acknowledge the callback
         await _post("answerCallbackQuery", {"callback_query_id": cq["id"]})
 
-        if manager_id and sender_chat != manager_id:
+        if sender_chat != manager_id:
             logger.warning("Ignoring callback from unauthorized chat %s", sender_chat)
             return
 
@@ -311,7 +329,7 @@ async def handle_update(update: Dict[str, Any]) -> None:
         chat_id = str(msg.get("chat", {}).get("id", ""))
         text = msg.get("text", "").strip()
 
-        if manager_id and chat_id != manager_id:
+        if chat_id != manager_id:
             return  # ignore messages from non-manager chats
 
         pending_note = _pending_deny_note.get(chat_id)
@@ -372,11 +390,11 @@ async def run_polling() -> None:
     Call this as a background asyncio task during app lifespan.
     """
     if not _is_enabled():
-        logger.info("Telegram bot disabled (TELEGRAM_ENABLED != true). Skipping polling.")
+        logger.info("Telegram bot disabled (TELEGRAM_ENABLED != true or incomplete config). Skipping polling.")
         return
 
-    if not _token():
-        logger.warning("TELEGRAM_BOT_TOKEN not set — Telegram bot will not start.")
+    if not _token() or not _manager_chat_id().strip():
+        logger.error("Telegram credentials incomplete — polling aborted.")
         return
 
     logger.info("Starting Telegram long-polling…")

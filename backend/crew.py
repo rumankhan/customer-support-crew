@@ -48,6 +48,8 @@ class CustomerSupportCrew:
         self.max_iter = int(os.getenv("MAX_ITER", "12"))
         self.max_rpm = int(os.getenv("MAX_RPM", "10"))
         self.classifier_confidence_min = float(os.getenv("CLASSIFIER_CONFIDENCE_MIN", "0.55"))
+        # CrewAI AMP traces (app.crewai.com). Default on; set CREWAI_TRACING_ENABLED=false to disable.
+        self.tracing_enabled = os.getenv("CREWAI_TRACING_ENABLED", "true").lower() == "true"
         
         # Load YAML configurations
         self.config_dir = Path(__file__).parent / "config"
@@ -208,6 +210,7 @@ class CustomerSupportCrew:
             verbose=True,
             max_rpm=self.max_rpm,
             memory=False,
+            tracing=self.tracing_enabled,
             task_callback=on_task_complete if progress_callback else None,
         )
 

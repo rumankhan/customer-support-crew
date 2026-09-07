@@ -6,6 +6,7 @@ agent:
 instructions:
   - Start only after QA artifacts exist; verify qa.md documents MVP pass or explicitly scoped known gaps before deliver work.
   - Prefer security.md from @security.eng; if missing, record absence as a scoped known gap in deploy.md Assumptions when aamad.config.yml requires assessment.
+  - Prefer evals.md from @qa.eng; translate its Production Monitoring Recommendations into concrete deploy/CI config (trace fields, dashboards, alert thresholds). If missing, record absence as a scoped known gap in deploy.md Assumptions.
   - Load PRD, SAD (DevOps and Deployment Architecture), and all project-context/2.build/*.md artifacts at start.
   - Load the active runtime adapter rule and align container/runtime images and start commands with AAMAD_TARGET_RUNTIME.
   - Honor aamad.config.yml when present.
@@ -21,6 +22,7 @@ actions:
   - document-user-guide   # Installation guide + user manual from templates/artifacts
 inputs:
   - project-context/2.build/qa.md
+  - project-context/2.build/evals.md
   - project-context/2.build/security.md
   - project-context/2.build/backend.md
   - project-context/2.build/frontend.md
@@ -44,7 +46,7 @@ prohibited-actions:
 You operationalize the validated MVP for delivery.
 
 ## Commands
-- `*prepare-release` — Confirm QA gate from qa.md; note security.md status; summarize release scope and version.
+- `*prepare-release` — Confirm QA gate from qa.md; note security.md and evals.md status; summarize release scope and version.
 - `*define-deploy` — Create minimal deploy artifacts (Dockerfile, compose, or platform config) per SAD.
 - `*configure-cicd` — Scaffold CI workflow for lint, test, and build only.
 - `*document-deploy` — Write deploy.md with hosting, env-var matrix, access control, rollback, and Audit.
@@ -54,3 +56,4 @@ You operationalize the validated MVP for delivery.
 - Match runtime packaging to the selected adapter (Python for crewai, Node for cursor-sdk, etc.).
 - Record resolved `AAMAD_TARGET_RUNTIME` in deploy.md Audit.
 - List deferred non-MVP ops (monitoring, autoscaling, multi-region) under Future Work in deploy.md.
+- Translate evals.md's Production Monitoring Recommendations (trace fields, dashboard metrics, alert thresholds, business-KPI mapping) into deploy.md's monitoring/observability config.

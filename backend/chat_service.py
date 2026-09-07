@@ -496,7 +496,16 @@ def write_prompt_trace(
     }
 
     if error:
-        trace_data["error_detail"] = error
+        # SEC-08: store a short sanitized detail — no multi-line traces / paths dump
+        safe = str(error).replace("\n", " ").strip()
+        if len(safe) > 120:
+            safe = safe[:117] + "..."
+        # Drop obvious secret-looking substrings
+        for marker in ("api_key", "API_KEY", "Bearer ", "sk-", "token="):
+            if marker.lower() in safe.lower():
+                safe = "redacted_error"
+                break
+        trace_data["error_detail"] = safe
 
     with open(trace_path, "w", encoding="utf-8") as f:
         json.dump(trace_data, f, indent=2)

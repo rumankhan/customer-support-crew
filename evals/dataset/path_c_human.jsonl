@@ -1,0 +1,2 @@
+{"id": "C-001", "category": "path_c_human", "ecs": ["EC-009", "EC-010"], "message": "I need help with my account please.", "request_human": true, "expect": {"decision": "escalate", "packet_required": true, "stub_ticket_required": true, "packet_fields": ["intent", "citations_attempted", "draft_reply", "sentiment", "reason_codes"]}}
+{"id": "C-002", "category": "path_c_human", "ecs": ["EC-009", "EC-010"], "message": "How do I reset my B-Mobile My Account PIN?", "request_human": true, "expect": {"decision": "escalate", "packet_required": true, "stub_ticket_required": true}}

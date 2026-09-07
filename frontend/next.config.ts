@@ -14,7 +14,8 @@ const nextConfig: NextConfig = {
     // (CORS + private-network blocks in some embedded browsers).
     return [
       { source: "/api/chat", destination: `${apiBase}/api/chat` },
-      { source: "/api/approvals/:path*", destination: `${apiBase}/api/approvals/:path*` },
+      // /api/approvals/* handled by app/api/approvals/[...path]/route.ts
+      // (injects X-Operator-Key — do not rewrite directly to FastAPI)
       { source: "/health", destination: `${apiBase}/health` },
     ];
   },
