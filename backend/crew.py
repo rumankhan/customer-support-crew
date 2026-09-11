@@ -22,6 +22,62 @@ from backend.tools import (
 )
 from backend.llm_config import build_crew_llm, resolve_llm_settings
 
+_LAST_CREW_TRACE_URL: Optional[str] = None
+_TRACE_CAPTURE_INSTALLED = False
+_CREWAI_TRACE_PREFIX = "https://app.crewai.com/"
+
+
+def allowed_crew_trace_url(url: Optional[str]) -> Optional[str]:
+    """Return a CrewAI AMP dashboard URL, or None if missing/unsafe."""
+    if not url or not isinstance(url, str):
+        return None
+    cleaned = url.strip()
+    if cleaned.startswith(_CREWAI_TRACE_PREFIX):
+        return cleaned
+    return None
+
+
+def last_crew_trace_url() -> Optional[str]:
+    return allowed_crew_trace_url(_LAST_CREW_TRACE_URL)
+
+
+def _remember_crew_trace_url(url: Optional[str]) -> None:
+    global _LAST_CREW_TRACE_URL
+    _LAST_CREW_TRACE_URL = allowed_crew_trace_url(url)
+
+
+def _install_trace_url_capture() -> None:
+    """Hook CrewAI AMP finalization so we can persist the dashboard URL."""
+    global _TRACE_CAPTURE_INSTALLED
+    if _TRACE_CAPTURE_INSTALLED:
+        return
+    try:
+        from crewai.events.listeners.tracing.trace_listener import (
+            TraceCollectionListener,
+        )
+        from crewai.utilities.constants import CREWAI_BASE_URL
+    except ImportError:
+        return
+    listener = TraceCollectionListener._instance
+    if listener is None:
+        return
+    batch_manager = listener.batch_manager
+    original = batch_manager._finalize_backend_batch
+
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        batch_id = batch_manager.trace_batch_id
+        ephemeral = batch_manager.is_current_batch_ephemeral
+        result = original(*args, **kwargs)
+        url = getattr(batch_manager, "ephemeral_trace_url", None)
+        if not url and batch_id:
+            kind = "ephemeral_trace_batches" if ephemeral else "trace_batches"
+            url = f"{CREWAI_BASE_URL}/crewai_plus/{kind}/{batch_id}"
+        _remember_crew_trace_url(url)
+        return result
+
+    batch_manager._finalize_backend_batch = wrapped
+    _TRACE_CAPTURE_INSTALLED = True
+
 
 class CustomerSupportCrew:
     """
@@ -214,10 +270,15 @@ class CustomerSupportCrew:
             task_callback=on_task_complete if progress_callback else None,
         )
 
+        global _LAST_CREW_TRACE_URL
+        _LAST_CREW_TRACE_URL = None
+        _install_trace_url_capture()
         result = crew.kickoff()
+        crew_trace_url = last_crew_trace_url()
 
         return {
             "result": result,
             "tasks": tasks,
             "inputs": inputs,
+            "crew_trace_url": crew_trace_url,
         }

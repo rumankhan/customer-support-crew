@@ -42,6 +42,8 @@ export type ApprovalRequest = {
   created_at: string;
   decided_at: string | null;
   decided_by: string | null;
+  trace_id: string | null;
+  crew_trace_url: string | null;
 };
 
 export type ChatResponse = {
@@ -56,6 +58,7 @@ export type ChatResponse = {
   packet: EscalationPacket | null;
   stub_ticket_id: string | null;
   approval: ApprovalRequest | null;
+  crew_trace_url?: string | null;
   meta: {
     ai_disclosure: true;
     disclosure_acknowledged: boolean;

@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Callable, Optional
 
-from backend.crew import CustomerSupportCrew
+from backend.crew import CustomerSupportCrew, allowed_crew_trace_url, last_crew_trace_url
 from backend.models import (
     ApprovalRequest,
     ChatRequest,
@@ -24,6 +24,18 @@ from backend.models import (
 )
 
 ProgressCallback = Callable[[dict[str, Any]], None]
+
+_last_chat_response: ChatResponse | None = None
+
+
+def store_last_chat_response(response: ChatResponse) -> None:
+    """Keep the latest ChatResponse for the operator projector."""
+    global _last_chat_response
+    _last_chat_response = response
+
+
+def get_last_chat_response() -> ChatResponse | None:
+    return _last_chat_response
 
 AGENT_IDS = [
     "query_classifier",
@@ -516,6 +528,7 @@ def map_to_response(result: dict, trace_id: str, request: ChatRequest) -> ChatRe
                 context=context,
                 session_id=request.session_id,
                 trace_id=trace_id,
+                crew_trace_url=result.get("crew_trace_url"),
             )
             # Telegram notification happens in the async streaming path
             # (streaming.py sends it after receiving pending_approval response)
@@ -550,6 +563,7 @@ def map_to_response(result: dict, trace_id: str, request: ChatRequest) -> ChatRe
         packet=packet,
         stub_ticket_id=stub_ticket_id,
         approval=approval,
+        crew_trace_url=allowed_crew_trace_url(result.get("crew_trace_url")),
         meta=meta,
         error=None,
     )
@@ -633,6 +647,13 @@ def write_prompt_trace(
         },
         "elapsed_ms": int((datetime.now() - start_time).total_seconds() * 1000),
     }
+    amp_url = response.crew_trace_url
+    if not amp_url and response.approval is not None:
+        amp_url = response.approval.crew_trace_url
+    if not amp_url:
+        amp_url = last_crew_trace_url()
+    if amp_url:
+        trace_data["crew_trace_url"] = amp_url
 
     if error:
         # SEC-08: store a short sanitized detail — no multi-line traces / paths dump

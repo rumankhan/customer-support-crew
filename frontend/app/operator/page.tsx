@@ -2,11 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { fetchApprovalHistory, fetchPendingApprovals } from "@/lib/approvals";
-import type { ApprovalRequest } from "@/lib/types";
+import { fetchApprovalHistory, fetchLastResult, fetchPendingApprovals } from "@/lib/approvals";
+import type { ApprovalRequest, ChatResponse } from "@/lib/types";
+import { SpecialistStrip } from "@/components/SpecialistStrip";
 
 function formatAmount(amount: number | null): string {
   return amount == null ? "—" : `$${amount.toFixed(2)}`;
+}
+
+function crewTraceHref(url: string | null): string | null {
+  if (!url || !url.startsWith("https://app.crewai.com/")) return null;
+  return url;
 }
 
 function ApprovalCard({ item }: { item: ApprovalRequest }) {
@@ -16,6 +22,7 @@ function ApprovalCard({ item }: { item: ApprovalRequest }) {
       : item.status === "approved"
         ? "Approved"
         : "Denied";
+  const crewTraceUrl = crewTraceHref(item.crew_trace_url);
   return (
     <article className="rounded-lg border border-line bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-2">
@@ -49,6 +56,29 @@ function ApprovalCard({ item }: { item: ApprovalRequest }) {
             <dd>{item.operator_note}</dd>
           </div>
         ) : null}
+        {item.trace_id ? (
+          <div>
+            <dt className="text-muted">Prompt trace</dt>
+            <dd className="font-mono text-xs break-all">{item.trace_id}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt className="text-muted">CrewAI trace</dt>
+          <dd className="text-xs">
+            {crewTraceUrl ? (
+              <a
+                className="break-all text-accent underline"
+                href={crewTraceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {crewTraceUrl}
+              </a>
+            ) : (
+              <span className="text-muted">Not captured for this request</span>
+            )}
+          </dd>
+        </div>
       </dl>
     </article>
   );
@@ -57,19 +87,22 @@ function ApprovalCard({ item }: { item: ApprovalRequest }) {
 export default function OperatorPage() {
   const [pending, setPending] = useState<ApprovalRequest[]>([]);
   const [history, setHistory] = useState<ApprovalRequest[]>([]);
+  const [lastCrew, setLastCrew] = useState<ChatResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [nextPending, nextHistory] = await Promise.all([
+      const [nextPending, nextHistory, nextCrew] = await Promise.all([
         fetchPendingApprovals(),
         fetchApprovalHistory(),
+        fetchLastResult(),
       ]);
       setPending(nextPending);
       setHistory(nextHistory);
+      setLastCrew(nextCrew);
       setError(null);
     } catch {
-      setError("Could not load approvals. Is the backend running?");
+      setError("Could not load operator data. Is the backend running?");
     }
   }, []);
 
@@ -90,7 +123,7 @@ export default function OperatorPage() {
         <h1 className="mt-1 font-display text-3xl font-semibold">Manager queue</h1>
         <p className="mt-2 text-sm text-muted">
           Read-only projector view. Approve or deny in Telegram — this page does not
-          take actions.
+          take actions. Last crew reply and steps appear below for grading.
         </p>
         <p className="mt-2 text-sm">
           <Link className="text-accent underline" href="/">
@@ -104,6 +137,17 @@ export default function OperatorPage() {
           {error}
         </p>
       ) : null}
+
+      <section>
+        {lastCrew ? (
+          <SpecialistStrip result={lastCrew} />
+        ) : (
+          <p className="rounded-lg border border-dashed border-line bg-white px-4 py-6 text-sm text-muted">
+            No crew response yet. Run a chat on the customer page, then this panel
+            shows the reply, sources, and agent steps.
+          </p>
+        )}
+      </section>
 
       <section>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">

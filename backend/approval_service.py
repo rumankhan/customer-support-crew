@@ -28,6 +28,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _safe_crew_trace_url(url: Optional[str]) -> Optional[str]:
+    if not url or not isinstance(url, str):
+        return None
+    cleaned = url.strip()
+    if cleaned.startswith("https://app.crewai.com/"):
+        return cleaned
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Policy-action detection
 # ─────────────────────────────────────────────────────────────────────────────
@@ -187,10 +196,12 @@ def create_approval(
     context: Dict[str, Any],
     session_id: Optional[str] = None,
     trace_id: Optional[str] = None,
+    crew_trace_url: Optional[str] = None,
 ) -> ApprovalRequest:
     """Write a pending approval row and return the ApprovalRequest model."""
     approval_id = f"APR-{uuid.uuid4().hex[:8].upper()}"
     now = _now()
+    amp_url = _safe_crew_trace_url(crew_trace_url)
 
     conn = get_connection()
     with conn:
@@ -198,8 +209,8 @@ def create_approval(
             """
             INSERT INTO approval_requests
             (id, session_id, trace_id, action_kind, subject_id, amount, reason,
-             context_json, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+             context_json, status, created_at, crew_trace_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
             """,
             (
                 approval_id,
@@ -211,6 +222,7 @@ def create_approval(
                 reason,
                 json.dumps(context),
                 now,
+                amp_url,
             ),
         )
     conn.close()
@@ -224,6 +236,8 @@ def create_approval(
         status="pending",
         context=context,
         created_at=now,
+        trace_id=trace_id,
+        crew_trace_url=amp_url,
     )
 
 
@@ -294,6 +308,14 @@ def list_history(limit: int = 10) -> List[ApprovalRequest]:
     return [_row_to_model(r) for r in rows]
 
 
+def _row_value(row, key: str, default=None):
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return default
+    return default if value is None else value
+
+
 def _row_to_model(row) -> ApprovalRequest:
     ctx = {}
     try:
@@ -313,6 +335,8 @@ def _row_to_model(row) -> ApprovalRequest:
         created_at=row["created_at"],
         decided_at=row["decided_at"],
         decided_by=row["decided_by"],
+        trace_id=_row_value(row, "trace_id"),
+        crew_trace_url=_safe_crew_trace_url(_row_value(row, "crew_trace_url")),
     )
 
 

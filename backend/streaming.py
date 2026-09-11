@@ -16,6 +16,7 @@ from backend.chat_service import (
     error_response,
     map_to_response,
     run_crew_sync,
+    store_last_chat_response,
     write_prompt_trace,
 )
 from backend.crew import CustomerSupportCrew
@@ -69,6 +70,7 @@ async def chat_stream_events(
 
             response = map_to_response(result, trace_id, request)
             write_prompt_trace(trace_id, request, response, start_time, crew)
+            store_last_chat_response(response)
 
             # ── HITL path ─────────────────────────────────────────────────────
             if response.decision == "pending_approval" and response.approval:
@@ -92,6 +94,7 @@ async def chat_stream_events(
                             "reason_codes": ["manager_unavailable"],
                         }
                     )
+                    store_last_chat_response(unavailable)
                     push("complete", {"response": unavailable.model_dump()})
                 else:
                     msg_id = await notify_manager(approval)
@@ -144,6 +147,7 @@ async def chat_stream_events(
                                     "approval": decided,
                                 }
                             )
+                            store_last_chat_response(final)
                             push(
                                 "approval_decided",
                                 {
@@ -167,6 +171,7 @@ async def chat_stream_events(
                                     "reason_codes": ["hitl_timeout"],
                                 }
                             )
+                            store_last_chat_response(timeout_resp)
                             push(
                                 "approval_timeout",
                                 {
@@ -189,6 +194,7 @@ async def chat_stream_events(
                                 "reason_codes": ["hitl_timeout"],
                             }
                         )
+                        store_last_chat_response(timeout_resp)
                         push(
                             "approval_timeout",
                             {
@@ -214,6 +220,7 @@ async def chat_stream_events(
                 reason_codes=["timeout"],
             )
             write_prompt_trace(trace_id, request, response, start_time, crew, error="timeout")
+            store_last_chat_response(response)
             push("error", {"response": response.model_dump()})
 
         except FileNotFoundError as exc:
@@ -225,6 +232,7 @@ async def chat_stream_events(
                 reason_codes=["system_error"],
             )
             write_prompt_trace(trace_id, request, response, start_time, crew, error=str(exc))
+            store_last_chat_response(response)
             push("error", {"response": response.model_dump()})
 
         except Exception as exc:
@@ -237,6 +245,7 @@ async def chat_stream_events(
                 reason_codes=["system_error"],
             )
             write_prompt_trace(trace_id, request, response, start_time, crew, error=str(exc))
+            store_last_chat_response(response)
             push("error", {"response": response.model_dump()})
 
         finally:

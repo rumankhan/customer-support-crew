@@ -34,15 +34,16 @@ from backend.auth import require_operator_key
 from backend.chat_service import (
     DEFAULT_TIMEOUT_SECONDS,
     error_response,
+    get_last_chat_response,
     issue_stub_ticket_id,
     map_to_response,
     run_crew_sync,
+    store_last_chat_response,
     write_prompt_trace,
 )
 from backend.streaming import chat_stream_events
 
 crew_instance: Optional[CustomerSupportCrew] = None
-last_result: Optional[ChatResponse] = None
 _telegram_task: Optional[asyncio.Task] = None
 
 
@@ -167,7 +168,7 @@ async def health_check():
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """Non-streaming chat — full ChatResponse after crew kickoff (legacy / tests)."""
-    global crew_instance, last_result
+    global crew_instance
 
     if not crew_instance:
         return error_response(
@@ -193,7 +194,7 @@ async def chat(request: ChatRequest):
         )
         response = map_to_response(result, trace_id, request)
         write_prompt_trace(trace_id, request, response, start_time, crew_instance)
-        last_result = response
+        store_last_chat_response(response)
         return response
 
     except asyncio.TimeoutError:
@@ -205,7 +206,7 @@ async def chat(request: ChatRequest):
             reason_codes=["timeout"],
         )
         write_prompt_trace(trace_id, request, response, start_time, crew_instance, error="timeout")
-        last_result = response
+        store_last_chat_response(response)
         return response
 
     except FileNotFoundError as e:
@@ -217,7 +218,7 @@ async def chat(request: ChatRequest):
             reason_codes=["system_error"],
         )
         write_prompt_trace(trace_id, request, response, start_time, crew_instance, error=str(e))
-        last_result = response
+        store_last_chat_response(response)
         return response
 
     except Exception as e:
@@ -230,7 +231,7 @@ async def chat(request: ChatRequest):
             reason_codes=["system_error"],
         )
         write_prompt_trace(trace_id, request, response, start_time, crew_instance, error=str(e))
-        last_result = response
+        store_last_chat_response(response)
         return response
 
 
@@ -243,6 +244,7 @@ async def chat_stream(request: ChatRequest):
     if not crew_instance:
         trace_id = str(uuid.uuid4())
         err = error_response(trace_id, "system_error", "Crew not initialized", request)
+        store_last_chat_response(err)
 
         async def _err_once():
             import json
@@ -323,10 +325,10 @@ async def approval_decide(approval_id: str, body: ApprovalDecisionRequest):
     dependencies=[Depends(require_operator_key)],
 )
 async def get_last_result():
-    global last_result
-    if not last_result:
+    row = get_last_chat_response()
+    if not row:
         raise HTTPException(status_code=404, detail="No result available")
-    return last_result
+    return row
 
 
 if __name__ == "__main__":

@@ -102,6 +102,12 @@ function asApproval(value: unknown): ChatResponse["approval"] {
     created_at: asString(row.created_at),
     decided_at: typeof row.decided_at === "string" ? row.decided_at : null,
     decided_by: typeof row.decided_by === "string" ? row.decided_by : null,
+    trace_id: typeof row.trace_id === "string" ? row.trace_id : null,
+    crew_trace_url:
+      typeof row.crew_trace_url === "string" &&
+      row.crew_trace_url.startsWith("https://app.crewai.com/")
+        ? row.crew_trace_url
+        : null,
   };
 }
 
@@ -148,6 +154,11 @@ export function normalizeChatResponse(raw: unknown): ChatResponse | null {
     packet: asPacket(row.packet),
     stub_ticket_id: typeof row.stub_ticket_id === "string" ? row.stub_ticket_id : null,
     approval: asApproval(row.approval),
+    crew_trace_url:
+      typeof row.crew_trace_url === "string" &&
+      row.crew_trace_url.startsWith("https://app.crewai.com/")
+        ? row.crew_trace_url
+        : null,
     meta: {
       ai_disclosure: true,
       disclosure_acknowledged: Boolean(metaRaw.disclosure_acknowledged),

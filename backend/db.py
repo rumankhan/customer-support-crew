@@ -121,9 +121,17 @@ def init_db(db_path: Optional[str] = None) -> None:
                 decided_by          TEXT,
                 telegram_message_id INTEGER,
                 created_at          TEXT NOT NULL,
-                decided_at          TEXT
+                decided_at          TEXT,
+                crew_trace_url      TEXT
             )
         """)
+        existing = {
+            row[1] for row in conn.execute("PRAGMA table_info(approval_requests)")
+        }
+        if "crew_trace_url" not in existing:
+            conn.execute(
+                "ALTER TABLE approval_requests ADD COLUMN crew_trace_url TEXT"
+            )
 
     conn.close()
 

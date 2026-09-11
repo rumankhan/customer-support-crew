@@ -98,6 +98,10 @@ class ApprovalRequest(BaseModel):
     created_at: str = Field(default="", description="ISO timestamp")
     decided_at: Optional[str] = Field(default=None)
     decided_by: Optional[str] = Field(default=None, description="telegram:{user_id}")
+    trace_id: Optional[str] = Field(default=None, description="Local prompt-trace identifier")
+    crew_trace_url: Optional[str] = Field(
+        default=None, description="CrewAI AMP dashboard URL for this crew run"
+    )
 
 
 class ApprovalDecisionRequest(BaseModel):
@@ -156,6 +160,9 @@ class ChatResponse(BaseModel):
     packet: Optional[EscalationPacket] = Field(default=None, description="Escalation packet (null on resolve)")
     stub_ticket_id: Optional[str] = Field(default=None, description="Stub ticket ID (null on resolve)")
     approval: Optional[ApprovalRequest] = Field(default=None, description="Approval proposal (on pending_approval)")
+    crew_trace_url: Optional[str] = Field(
+        default=None, description="CrewAI AMP dashboard URL for this crew run"
+    )
     meta: MetaInfo = Field(default_factory=MetaInfo, description="Metadata (AC-01b)")
     error: Optional[ErrorDetail] = Field(default=None, description="Error details (null on success)")
 

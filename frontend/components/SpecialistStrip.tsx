@@ -8,6 +8,11 @@ type Props = {
   result: ChatResponse | null;
 };
 
+function crewTraceHref(url: string | null | undefined): string | null {
+  if (!url || !url.startsWith("https://app.crewai.com/")) return null;
+  return url;
+}
+
 export function SpecialistStrip({ result }: Props) {
   const [stepsOpen, setStepsOpen] = useState(false);
 
@@ -22,13 +27,15 @@ export function SpecialistStrip({ result }: Props) {
 
   if (!result) return null;
 
+  const ampUrl = crewTraceHref(result.crew_trace_url ?? result.approval?.crew_trace_url);
+
   return (
     <aside className="rounded-lg border border-line bg-white p-4 shadow-sm">
       <h3 className="text-sm font-semibold uppercase tracking-wide text-muted">
-        For specialists
+        Last crew response
       </h3>
       <p className="mt-1 text-xs text-muted">
-        Outcome, reasons, and handoff notes for grading and live support later.
+        Outcome, reply, sources, and agent steps from the latest chat run.
       </p>
       <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
         <div>
@@ -39,14 +46,51 @@ export function SpecialistStrip({ result }: Props) {
           </dd>
         </div>
         <div>
-          <dt className="text-muted">Trace</dt>
-          <dd className="font-mono text-xs">{result.trace_id}</dd>
+          <dt className="text-muted">Prompt trace</dt>
+          <dd className="break-all font-mono text-xs">{result.trace_id}</dd>
         </div>
         <div className="sm:col-span-2">
           <dt className="text-muted">Reasons</dt>
           <dd>{result.reason_codes.join(", ") || "—"}</dd>
         </div>
+        <div className="sm:col-span-2">
+          <dt className="text-muted">CrewAI trace</dt>
+          <dd className="text-xs">
+            {ampUrl ? (
+              <a
+                className="break-all text-accent underline"
+                href={ampUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {ampUrl}
+              </a>
+            ) : (
+              <span className="text-muted">Not captured for this request</span>
+            )}
+          </dd>
+        </div>
       </dl>
+      <div className="mt-3 rounded-md border border-line bg-canvas p-3 text-sm">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted">
+          Customer reply
+        </p>
+        <p className="mt-1 whitespace-pre-wrap">{result.reply || "—"}</p>
+        {result.sources_used.length > 0 ? (
+          <div className="mt-2 border-t border-line pt-2">
+            <p className="text-xs font-medium text-muted">{UI.sourcesHeading}</p>
+            <ul className="mt-1 space-y-1">
+              {result.sources_used.map((source) => (
+                <li key={source.title} className="text-xs text-muted">
+                  <span className="font-medium text-ink">{source.title}</span>
+                  {" — "}
+                  {source.snippet}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
       <button
         type="button"
         className="mt-3 text-sm text-accent underline"
