@@ -13,7 +13,7 @@
 | Gate | Artifact | Status | Notes |
 |------|----------|--------|-------|
 | QA | `project-context/2.build/qa.md` | **PASS** | Live Path A (2026-08-26/27); FTS5 + Telegram HITL noted; concurrent kickoff gap accepted for single-user demo |
-| Evals | `project-context/2.build/evals.md` | **PASS** (static + fixtures) | Course pass 2026-09-07; live `--live` deferred when API down; EC-005 judge uncalibrated |
+| Evals | `project-context/2.build/evals.md` | **MVP PASS** / **production_ready false** | Static+fixtures pass; live 2026-09-09 failed Path B/C + Path A p95 68.9s vs 30s |
 | Security | `project-context/2.build/security.md` | **PASS (mitigated)** | Present — not an accepted gap. SEC-01–03/05/06/08/09 mitigated 2026-09-06. **SEC-04** (open chat cost/DoS) accepted residual for localhost |
 | Config | `aamad.config.yml` | Absent | Honor `aamad.config.example.yml` prefs (`security.require_security_assessment: true` satisfied by security.md) |
 | Runtime | Adapter | `crewai` | `.cursor/rules/adapter-crewai.mdc`; packaging uses Python + `backend/main.py` + YAML crew |
@@ -239,7 +239,7 @@ Aligned with evals.md §7 Production Monitoring Recommendations and SAD §4 Obse
 |-----------|----------|
 | Error rate > 5% over 15m | Alert |
 | p95 latency > `CHAT_TIMEOUT_SECONDS` (180s) | Hard infra |
-| p95 latency > 30s | Soft SLO warning only (evals OQ#13d) |
+| Path A p95 latency > 30s | **Production fail / page** (evals EC-006); MVP soft warning |
 | Token/cost spike > 150% of baseline | Alert when token metrics exist |
 
 ### Dependency audit (operator)
@@ -335,3 +335,13 @@ Demo script and deeper run notes: [`RUNNING.md`](../../RUNNING.md).
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai |
 | Change note | Docs aligned for local + Compose URLs; Docker artifacts committed |
 | Prompt Trace | Omitted — docs only; no secrets |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-09-10T21:25:00-05:00 |
+| Persona id | qa-eng |
+| Action | run-evals (production Path A p95 alert) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Change note | Path A p95 &gt; 30s is a production fail (was MVP warning-only) |

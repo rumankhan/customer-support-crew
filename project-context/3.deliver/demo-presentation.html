@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>B-Mobile Support — Peer Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --navy: #10233d;
+      --navy-2: #173252;
+      --ink: #132033;
+      --muted: #5c6b7a;
+      --paper: #f6f1e8;
+      --card: #fffcf7;
+      --line: #e4ddd0;
+      --teal: #0e7c74;
+      --teal-soft: #e4f3f1;
+      --sand: #efe6d6;
+      --warn: #9a4b12;
+      --warn-soft: #f8ead8;
+      --ok: #1f6b4a;
+      --ok-soft: #e3f1ea;
+      --violet: #4a3f8f;
+      --violet-soft: #eceaf8;
+      --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
+      --sans: "Outfit", "Segoe UI", sans-serif;
+      --mono: "Cascadia Code", "SF Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%;
+      background: #0b1a2e; color: var(--ink);
+      font-family: var(--sans);
+    }
+    #deck { height: 100%; display: flex; flex-direction: column; }
+    .chrome {
+      display: flex; align-items: center; gap: 14px;
+      padding: 0 28px; height: 52px;
+      background: var(--navy); color: #c5d0de;
+      font-size: 13px; font-weight: 500; letter-spacing: 0.01em;
+      z-index: 2;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      color: #fff; font-weight: 600; letter-spacing: 0.02em;
+    }
+    .mark {
+      width: 22px; height: 22px; border-radius: 6px;
+      background: var(--teal); color: #fff;
+      display: grid; place-items: center;
+      font-size: 12px; font-weight: 600;
+    }
+    .chrome .dot { opacity: 0.35; }
+    .chrome .spacer { flex: 1; }
+    #counter { font-variant-numeric: tabular-nums; color: #9eb0c4; }
+    .chrome button {
+      font: inherit; background: transparent; color: #d7e2ed;
+      border: 1px solid #33506c; padding: 5px 12px; cursor: pointer;
+      border-radius: 999px;
+    }
+    .chrome button:hover { border-color: var(--teal); color: #fff; }
+    .progress { height: 3px; background: #1c3654; }
+    .progress > span { display: block; height: 100%; background: var(--teal); width: 0%; transition: width 0.35s ease; }
+    .stage { flex: 1; display: flex; overflow: hidden; background: #0b1a2e; }
+    .slides { flex: 1; position: relative; overflow: hidden; }
+    .slide {
+      display: none; height: 100%; padding: 44px 64px 48px;
+      background: var(--paper); overflow: auto;
+      flex-direction: column;
+    }
+    .slide.active { display: flex; animation: in 0.45s ease; }
+    .slide.cover {
+      background: var(--navy);
+      color: #f4efe6;
+      justify-content: flex-end;
+      padding: 56px 72px 64px;
+      position: relative;
+    }
+    .slide.cover::before {
+      content: "";
+      position: absolute; inset: 0;
+      background:
+        radial-gradient(900px 420px at 88% -10%, #1a8f86 0%, transparent 55%),
+        radial-gradient(700px 380px at 0% 110%, #1e4a78 0%, transparent 50%);
+      opacity: 0.55; pointer-events: none;
+    }
+    .slide.cover > * { position: relative; }
+    .slide.cover h1 { color: #fff; max-width: 16ch; }
+    .slide.cover .lead { color: #c9d6e4; }
+    .slide.cover .kicker { color: #8fe0d6; }
+    .slide.cover .title-meta { color: #9eb0c4; }
+    @keyframes in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: none; }
+    }
+    .kicker {
+      font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--teal); font-weight: 600; margin: 0 0 12px;
+    }
+    h1, h2 { font-family: var(--serif); font-weight: 500; letter-spacing: -0.02em; }
+    h1 { font-size: clamp(34px, 4.4vw, 52px); line-height: 1.12; margin: 0 0 16px; max-width: 18ch; }
+    h2 { font-size: clamp(26px, 3vw, 38px); line-height: 1.18; margin: 0 0 18px; max-width: 26ch; }
+    h3 { font-size: 15px; margin: 0 0 6px; font-weight: 600; letter-spacing: 0.01em; }
+    p, li { font-size: 17px; line-height: 1.5; color: var(--ink); }
+    .slide.cover p { color: #d5e0ec; }
+    p.lead { font-size: 21px; max-width: 36ch; color: var(--muted); margin: 0 0 24px; font-weight: 400; }
+    .muted { color: var(--muted); margin-top: 14px; font-size: 14.5px; }
+    .quote {
+      font-family: var(--serif); font-size: clamp(26px, 3vw, 36px);
+      line-height: 1.28; max-width: 22ch; margin: 0 0 24px; font-weight: 500;
+      padding-left: 20px; border-left: 3px solid var(--teal);
+    }
+    .quote span {
+      font-family: var(--sans); color: var(--muted); font-size: 14px;
+      font-weight: 500; display: block; margin-top: 14px; letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .grid { display: grid; gap: 14px; }
+    .g2 { grid-template-columns: 1fr 1fr; }
+    .g3 { grid-template-columns: 1fr 1fr 1fr; }
+    .g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .g6 { grid-template-columns: repeat(3, 1fr); }
+    .card {
+      background: var(--card); padding: 18px 18px 16px;
+      border-radius: 14px; border: 1px solid var(--line);
+    }
+    .card.ok { background: var(--ok-soft); border-color: #c5ddd4; }
+    .card.warn { background: var(--warn-soft); border-color: #ead4b8; }
+    .card.accent { background: var(--teal-soft); border-color: #c5e4e0; }
+    .card.violet { background: var(--violet-soft); border-color: #d5ccec; }
+    .num {
+      display: inline-block; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.12em; color: var(--teal); margin-bottom: 6px;
+    }
+    .card .num {
+      display: inline-block; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.12em; color: var(--teal); margin-bottom: 8px;
+    }
+    .card p { margin: 0; color: #3a4a58; font-size: 15px; }
+    .card.compact p { font-size: 13.5px; line-height: 1.45; }
+    ul.tight { margin: 4px 0 0; padding-left: 18px; }
+    ul.tight li { font-size: 14.5px; margin: 6px 0; color: #3a4a58; }
+    .chip {
+      display: inline-block; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.04em; padding: 3px 8px; border-radius: 999px;
+      background: var(--sand); color: var(--navy); margin: 2px 4px 0 0;
+    }
+    .chip.tool { background: var(--teal-soft); color: var(--teal); }
+    .chip.out { background: var(--warn-soft); color: var(--warn); }
+    .notes {
+      width: 320px; border-left: 1px solid #1c3654; background: #0f243c;
+      padding: 20px 18px; overflow: auto; display: none; color: #c5d0de;
+    }
+    .notes.open { display: block; }
+    .notes h3 {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em;
+      color: #8fe0d6; margin: 0 0 10px;
+    }
+    .notes p { font-size: 13px; color: #b7c6d6; line-height: 1.5; }
+    .help {
+      position: fixed; inset: 0; background: rgba(11, 26, 46, 0.62);
+      display: none; align-items: center; justify-content: center; z-index: 10;
+    }
+    .help.open { display: flex; }
+    .help .box {
+      background: var(--paper); padding: 28px 30px; width: 420px;
+      border-radius: 16px; border: 1px solid var(--line);
+    }
+    kbd {
+      font-family: var(--mono); font-size: 12px;
+      border: 1px solid var(--line); padding: 2px 7px; border-radius: 6px;
+      background: var(--card);
+    }
+    .title-meta { margin-top: auto; color: var(--muted); font-size: 14px; padding-top: 28px; }
+    .prompt {
+      font-family: var(--mono); font-size: 14.5px; background: var(--navy);
+      color: #e8eef5; border-radius: 12px; padding: 12px 16px; margin: 8px 0 10px;
+    }
+    .rule {
+      width: 48px; height: 3px; background: var(--teal); margin: 0 0 18px; border: 0;
+    }
+    .avatar {
+      width: 36px; height: 36px; border-radius: 10px;
+      display: grid; place-items: center;
+      font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 10px;
+    }
+    .a1 { background: #1e4a78; }
+    .a2 { background: var(--teal); }
+    .a3 { background: #3d6b4a; }
+    .a4 { background: var(--violet); }
+
+    /* Pipeline — stay in one row so the sequence stays readable */
+    .pipe {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      margin: 0 0 8px;
+    }
+    .pipe .node {
+      flex: 1; min-width: 0;
+      background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+      padding: 14px 12px 12px;
+    }
+    .pipe .node h3 { font-size: 14px; }
+    .pipe .node p { margin: 0; font-size: 13px; color: #3a4a58; line-height: 1.4; }
+    .connector {
+      flex: 0 0 22px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--teal);
+    }
+    .connector svg { width: 18px; height: 18px; }
+
+    .lane {
+      display: grid; grid-template-columns: 1.15fr 0.9fr; gap: 16px;
+    }
+    .steps-v { display: flex; flex-direction: column; gap: 0; }
+    .steps-v .row {
+      display: grid; grid-template-columns: 28px 1fr; gap: 12px;
+      position: relative;
+      margin-bottom: 14px;
+    }
+    .steps-v .row:not(:last-child)::before {
+      content: ""; position: absolute; left: 13px; top: 28px; bottom: -14px;
+      width: 2px; background: #c5e4e0;
+    }
+    .steps-v .dot {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--navy); color: #fff; display: grid; place-items: center;
+      font-size: 12px; font-weight: 600; position: relative; z-index: 1;
+    }
+    .steps-v h3 { margin: 2px 0 4px; }
+    .steps-v p { margin: 0; font-size: 14px; color: #3a4a58; }
+
+    .tree {
+      display: grid; grid-template-columns: 160px 1fr; gap: 10px 14px;
+      align-items: center;
+    }
+    .tree .src {
+      background: var(--navy); color: #fff; border-radius: 12px;
+      padding: 16px 14px; text-align: center; font-weight: 600;
+      grid-row: span 5;
+    }
+    .tree .branch {
+      display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: center;
+    }
+    .tree .branch .line {
+      height: 2px; background: var(--teal); border-radius: 2px;
+    }
+    .tree .leaf {
+      background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+      padding: 10px 14px; font-size: 14px; color: #3a4a58;
+    }
+    .tree .leaf b { display: block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--teal); margin-bottom: 2px; }
+
+    .layers { display: flex; flex-direction: column; gap: 8px; }
+    .layer {
+      border-radius: 12px; padding: 12px 16px; display: grid;
+      grid-template-columns: 92px 1fr; gap: 12px; align-items: center;
+    }
+    .layer b { font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .layer p { margin: 0; font-size: 14px; }
+    .l1 { background: #d7eee9; }
+    .l2 { background: #e8f0c9; }
+    .l3 { background: #f8ead8; }
+
+    .phone {
+      background: var(--navy); color: #e8eef5; border-radius: 18px;
+      padding: 16px 16px 14px; min-height: 220px;
+    }
+    .phone .bar { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #8fe0d6; margin-bottom: 10px; }
+    .phone .bubble {
+      background: #173252; border-radius: 10px; padding: 10px 12px;
+      font-size: 13.5px; line-height: 1.4; margin-bottom: 10px; color: #d5e0ec;
+    }
+    .btns { display: flex; gap: 8px; }
+    .btn-ok, .btn-no {
+      flex: 1; text-align: center; border-radius: 8px; padding: 8px 8px;
+      font-size: 13px; font-weight: 600;
+    }
+    .btn-ok { background: #1f6b4a; color: #fff; }
+    .btn-no { background: #7a3a1a; color: #fff; }
+
+    .sys {
+      display: flex; align-items: stretch; gap: 8px;
+      margin: 0 0 16px;
+    }
+    .sys .box {
+      flex: 1; min-width: 0;
+      background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+      padding: 14px 12px; text-align: center;
+    }
+    .sys .box h3 { margin-bottom: 4px; }
+    .sys .box p { margin: 0; font-size: 13px; color: #3a4a58; }
+    .sys .arrow {
+      flex: 0 0 28px; display: flex; align-items: center; justify-content: center;
+      color: var(--teal); font-size: 22px;
+    }
+
+    @media (max-width: 720px) {
+      .g3, .g2, .g6, .lane { grid-template-columns: 1fr; }
+      .slide, .slide.cover { padding: 36px 28px 40px; }
+    }
+    @media print {
+      .chrome, .notes, .help, .progress { display: none !important; }
+      .slide { display: flex !important; page-break-after: always; height: auto; min-height: 100vh; animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="deck">
+    <div class="chrome">
+      <span class="brand"><span class="mark">B</span> B-Mobile Support</span>
+      <span class="dot">·</span>
+      <span>Peer demo</span>
+      <span class="spacer"></span>
+      <span id="counter">1 / 1</span>
+      <button type="button" id="btn-prev">Prev</button>
+      <button type="button" id="btn-next">Next</button>
+      <button type="button" id="btn-notes">Notes</button>
+      <button type="button" id="btn-help">Keys</button>
+    </div>
+    <div class="progress"><span id="bar"></span></div>
+    <div class="stage">
+      <div class="slides" id="slides"></div>
+      <aside class="notes" id="notes"></aside>
+    </div>
+  </div>
+  <div class="help" id="help">
+    <div class="box">
+      <h3>Presenter keys</h3>
+      <p><kbd>→</kbd> <kbd>Space</kbd> next · <kbd>←</kbd> previous</p>
+      <p><kbd>N</kbd> speaker notes · <kbd>F</kbd> fullscreen · <kbd>?</kbd> this help</p>
+      <p><kbd>P</kbd> print / save as PDF</p>
+      <p class="muted" style="margin-top:12px">Keep the chat open at localhost:3000. Demo early.</p>
+    </div>
+  </div>
+
+  <script>
+    const ARROW = `<div class="connector" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12h14M14 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
+
+    const SLIDES = [
+      {
+        cover: true,
+        notes: "Look at the room. Ask: who has waited in a bot, then repeated the same story to a human? Hands. That feeling is the product. Do not mention CrewAI, ADRs, or ports yet.",
+        html: `
+          <p class="kicker">B-Mobile · six weeks</p>
+          <h1>You should not have to tell your story twice</h1>
+          <p class="lead">A chat that answers from real help articles — or hands a person everything they need to help you.</p>
+          <p class="title-meta">Not another FAQ bot. A better first conversation.</p>`
+      },
+      {
+        notes: "Keep this human. Pause after the quote. Then one breath on the promise: cite it, stop, or hand off with context.",
+        html: `
+          <p class="kicker">The moment we designed for</p>
+          <p class="quote">“I already told the bot. Why am I starting over?”<span>Every bad handoff sounds like this</span></p>
+          <div class="grid g2">
+            <div class="card">
+              <span class="num">Usual night</span>
+              <h3>What happens to you</h3>
+              <ul class="tight">
+                <li>The bot guesses, loops, or makes something up</li>
+                <li>You mash “talk to a person” and wait again</li>
+                <li>The agent sees a blank ticket and asks you to recap</li>
+              </ul>
+            </div>
+            <div class="card accent">
+              <span class="num">Our promise</span>
+              <h3>What should happen instead</h3>
+              <ul class="tight">
+                <li>If we know it, we show where it came from</li>
+                <li>If we don’t, we stop — we don’t invent a policy</li>
+                <li>If you want a human, they get your story, not a void</li>
+              </ul>
+            </div>
+          </div>`
+      },
+      {
+        notes: "Three seats. Customer always sees one chat. Agent inherits context. Manager only shows up when money or exceptions move. Then go LIVE — architecture comes after they have seen it.",
+        html: `
+          <p class="kicker">Who this is for</p>
+          <h2>Three people. One conversation.</h2>
+          <div class="grid g3">
+            <div class="card ok">
+              <span class="num">01 · Customer</span>
+              <h3>You, at 11pm</h3>
+              <p>You need a PIN reset. You should see that this is AI — and you can always ask for a person.</p>
+            </div>
+            <div class="card">
+              <span class="num">02 · Agent</span>
+              <h3>The person who inherits you</h3>
+              <p>They get what you asked, what we looked up, a draft, and why we handed off.</p>
+            </div>
+            <div class="card violet">
+              <span class="num">03 · Manager</span>
+              <h3>The one who owns money</h3>
+              <p>Credits and fee waivers wait for a yes on Telegram. You stay in the same chat.</p>
+            </div>
+          </div>`
+      },
+      {
+        notes: "This is the product, not the stack. Then go LIVE. Ask who wants Telegram HITL so you know whether to skip it.",
+        html: `
+          <p class="kicker">What you will see</p>
+          <h2>Four minutes as the customer</h2>
+          <div class="grid g2">
+            <div class="card ok">
+              <span class="num">01 · We know it</span>
+              <h3>Reset a PIN</h3>
+              <p>An answer with sources — like a helpful article, not a guess.</p>
+            </div>
+            <div class="card warn">
+              <span class="num">02 · We don’t</span>
+              <h3>A made-up warranty</h3>
+              <p>We should admit the miss. We should not invent a policy.</p>
+            </div>
+            <div class="card">
+              <span class="num">03 · Step aside</span>
+              <h3>“I’d rather talk to a person”</h3>
+              <p>That always works. The next human gets the full picture.</p>
+            </div>
+            <div class="card accent">
+              <span class="num">04 · Optional</span>
+              <h3>Ask for $25 back</h3>
+              <p>A manager approves or denies. You stay in chat, not a new queue.</p>
+            </div>
+          </div>
+          <p class="muted">Keep the PIN question calm. Angry wording is a different path on purpose.</p>`
+      },
+      {
+        notes: "SWITCH TO THE BROWSER. Disclosure first. Type the PIN query yourself so they see the stages. Point at sources. Do not narrate FastAPI. If it fails, say so and move on.",
+        html: `
+          <p class="kicker">Live · you are the customer</p>
+          <h2>Let’s reset a PIN</h2>
+          <p class="lead">Watch the chat like a customer would. The interesting part is how it feels — not the machinery.</p>
+          <p class="prompt">How do I reset my B-Mobile My Account PIN?</p>
+          <ul class="tight">
+            <li>You should see we are an AI assistant before you type.</li>
+            <li>You should see progress, then an answer tied to help articles.</li>
+            <li>“Talk to a person” stays available the whole time.</li>
+          </ul>`
+      },
+      {
+        notes: "Run B then C. For B, celebrate a polite miss. For C, click talk-to-human. Optional HITL if phone is ready. Then come back to the deck for how it works.",
+        html: `
+          <p class="kicker">Live · the two hard cases</p>
+          <h2>When we should shut up — and when we should step aside</h2>
+          <div class="grid g2">
+            <div class="card warn">
+              <span class="num">We don’t know this</span>
+              <p class="prompt">What is your quantum warranty for the hardware drone?</p>
+              <p>If we “answer” this, we failed you. A miss is success.</p>
+            </div>
+            <div class="card">
+              <span class="num">You asked for a person</span>
+              <p class="prompt">I want to talk to a human now — this billing charge is ridiculous!</p>
+              <p>Use talk-to-person. Someone should inherit the thread, not a blank ticket.</p>
+            </div>
+          </div>
+          <p class="muted">Credit demo, if Telegram is ready: Apply a $25 credit to ACC-1001 for the outage last week.</p>`
+      },
+      {
+        notes: "Now they have seen it. Explain the crew as jobs, not YAML. Customer still sees one chat. Point at tools under retriever and escalation. Then models next.",
+        html: `
+          <p class="kicker">The crew</p>
+          <h2>You still see one chat. Behind it, four specialists.</h2>
+          <div class="pipe">
+            <div class="node">
+              <div class="avatar a1">1</div>
+              <span class="num">query_classifier</span>
+              <h3>Classifier</h3>
+              <p>Intent, entities, urgency, confidence. Marks greetings and <em>out_of_scope</em>.</p>
+              <p style="margin-top:8px"><span class="chip">No tools</span></p>
+            </div>
+            ${ARROW}
+            <div class="node">
+              <div class="avatar a2">2</div>
+              <span class="num">knowledge_retriever</span>
+              <h3>Retriever</h3>
+              <p>Search help articles. Return passages and citations, or set <em>gap=true</em>.</p>
+              <p style="margin-top:8px"><span class="chip tool">kb_search</span></p>
+            </div>
+            ${ARROW}
+            <div class="node">
+              <div class="avatar a3">3</div>
+              <span class="num">response_specialist</span>
+              <h3>Writer</h3>
+              <p>A reply you can read. Only from those articles. Never invents a fee or warranty.</p>
+              <p style="margin-top:8px"><span class="chip">Grounded copy</span></p>
+            </div>
+            ${ARROW}
+            <div class="node">
+              <div class="avatar a4">4</div>
+              <span class="num">escalation_manager</span>
+              <h3>Triage</h3>
+              <p>Sentiment and risk. Resolve, hand to a person, or wait for a manager.</p>
+              <p style="margin-top:8px"><span class="chip tool">ticket_stub</span></p>
+            </div>
+          </div>
+          <p class="muted">Each agent gets the previous output as context. The customer never sees the handoffs.</p>`
+      },
+      {
+        notes: "Tonight: one shared Gemma on Ollama Cloud (or gpt-4o-mini if OpenAI). YAML still has low/mid tiers for later. Switch = env + restart. Fail = human, never a silent model hop.",
+        html: `
+          <p class="kicker">The models</p>
+          <h2>One brain tonight. Two jobs designed. Failures go to a person.</h2>
+          <div class="sys">
+            <div class="box">
+              <h3>Your message</h3>
+              <p>Chat → API → crew</p>
+            </div>
+            <div class="arrow">→</div>
+            <div class="box" style="background:var(--teal-soft);border-color:#c5e4e0">
+              <h3>LiteLLM router</h3>
+              <p>LLM_PROVIDER picks the host</p>
+            </div>
+            <div class="arrow">→</div>
+            <div class="box">
+              <h3>All four agents</h3>
+              <p>Same model, sequential pass</p>
+            </div>
+          </div>
+          <div class="grid g3">
+            <div class="card accent">
+              <span class="num">Tonight</span>
+              <h3>Gemma 4 31B</h3>
+              <p>Hosted on Ollama Cloud. One shared LLM instance for classify, retrieve, write, and triage. Swap to OpenAI <strong>gpt-4o-mini</strong> by changing a setting and restarting — never mid-question.</p>
+            </div>
+            <div class="card">
+              <span class="num">Designed tiers</span>
+              <h3>Low vs mid</h3>
+              <p><strong>Low</strong> (classifier, retriever, triage): cheap, structured JSON. <strong>Mid</strong> (writer): warmer customer copy. YAML already tags the split; tonight both tiers point at the same model.</p>
+            </div>
+            <div class="card warn">
+              <span class="num">When it dies</span>
+              <h3>Retry, then a human</h3>
+              <p>We do not hop to a different brain and pretend it was the same conversation. Timeout or system error → offer a person.</p>
+            </div>
+          </div>`
+      },
+      {
+        notes: "This is the safety story. Off-topic does not get a human pitch. Grounding is re-checked against FTS. YAML + Python + UI — three layers so the model cannot talk us into a bad answer.",
+        html: `
+          <p class="kicker">Guardrails</p>
+          <h2>We only answer B-Mobile. Everything else gets a polite no.</h2>
+          <div class="tree" style="margin-bottom:16px">
+            <div class="src">Customer<br>message</div>
+            <div class="branch"><span class="line"></span><div class="leaf"><b>Greeting</b>Hi / thanks — stay in chat. No article needed.</div></div>
+            <div class="branch"><span class="line"></span><div class="leaf"><b>Out of scope</b> Capital of France, other brands, hobbies — refuse. No “talk to a specialist.”</div></div>
+            <div class="branch"><span class="line"></span><div class="leaf"><b>In scope + article</b> Cited answer from help articles only.</div></div>
+            <div class="branch"><span class="line"></span><div class="leaf"><b>In scope + miss</b> Admit the gap. Do not invent a policy.</div></div>
+            <div class="branch"><span class="line"></span><div class="leaf"><b>Asked for a person / high risk</b> Escalate with the full packet.</div></div>
+          </div>
+          <div class="layers">
+            <div class="layer l1"><b>Crew YAML</b><p>Classifier can mark <em>out_of_scope</em>. Writer may only use retrieved citations. Retriever must set gap if nothing hits.</p></div>
+            <div class="layer l2"><b>Python</b><p>Deterministic overrides: strip human-handoff language on off-topic, re-check citations against FTS, mint <em>STUB-*</em> tickets so the model cannot invent TICKET-123.</p></div>
+            <div class="layer l3"><b>UI</b><p>Neutral tone never shows “connecting you with a specialist.” Disclosure is on before the first message.</p></div>
+          </div>`
+      },
+      {
+        notes: "HITL is not talk-to-human. Talk-to-human is escalation. HITL is money/exceptions: credit, ETF waiver, PIN override, refund, roaming exception. Customer waits on SSE. Manager taps Approve/Deny on Telegram. Timeout does not silently grant money.",
+        html: `
+          <p class="kicker">Human in the loop</p>
+          <h2>Money waits for a manager. You never leave the chat.</h2>
+          <div class="lane">
+            <div class="steps-v">
+              <div class="row"><span class="dot">1</span><div><h3>Crew finishes as usual</h3><p>Classify → retrieve → write → triage. HITL is a policy check after that — not a fifth agent.</p></div></div>
+              <div class="row"><span class="dot">2</span><div><h3>Detect a policy action</h3><p>Billing credit, ETF waiver, PIN override, refund, or roaming exception. Vague “credit for the outage” still goes to a manager.</p></div></div>
+              <div class="row"><span class="dot">3</span><div><h3>You wait in the same thread</h3><p>SSE holds the stream (~5 min). Copy: “A manager is reviewing your request…”</p></div></div>
+              <div class="row"><span class="dot">4</span><div><h3>Manager decides on Telegram</h3><p>Approve, or Deny with a typed reason. Timeout → we do not grant the credit. Operator page is the backup.</p></div></div>
+            </div>
+            <div class="phone">
+              <div class="bar">Telegram · manager</div>
+              <div class="bubble">Credit $25 to ACC-1001 for last week’s outage.<br><br>Plan: Unlimited · outage on file.</div>
+              <div class="btns"><div class="btn-ok">Approve</div><div class="btn-no">Deny</div></div>
+              <p style="margin:12px 0 0;font-size:12px;color:#9eb0c4">Customer stays on localhost:3000. The bot never spends the money.</p>
+            </div>
+          </div>`
+      },
+      {
+        notes: "Quick mosaic of the rest so it does not feel like a FAQ bot. Disclosure, live stages, citations, specialist packet, FTS KB, fail-open + evals. Do not linger.",
+        html: `
+          <p class="kicker">What else is in the product</p>
+          <h2>The pieces that make the chat feel honest</h2>
+          <div class="grid g6">
+            <div class="card compact">
+              <span class="num">Disclosure</span>
+              <h3>You know it is AI</h3>
+              <p>“I understand” before the first message. We never pretend to be a person.</p>
+            </div>
+            <div class="card compact accent">
+              <span class="num">Live stages</span>
+              <h3>SSE, not a spinner</h3>
+              <p>Each agent reports running / done. You watch classify → search → write → decide.</p>
+            </div>
+            <div class="card compact">
+              <span class="num">Citations</span>
+              <h3>From our help articles</h3>
+              <p>Titles and snippets under the reply. If FTS would not have retrieved it, we strip it.</p>
+            </div>
+            <div class="card compact">
+              <span class="num">Handoff packet</span>
+              <h3>STUB ticket + story</h3>
+              <p>Intent, citations tried, draft, sentiment, risk, reason codes. Specialist strip expands the four steps.</p>
+            </div>
+            <div class="card compact">
+              <span class="num">Knowledge base</span>
+              <h3>SQLite FTS5</h3>
+              <p>Local help articles, not the open web. Stub accounts (ACC-1001) for credit demos.</p>
+            </div>
+            <div class="card compact">
+              <span class="num">Fail-open</span>
+              <h3>Broken AI → a person</h3>
+              <p>Timeouts and system errors escalate. Golden evals catch over-confident misses before we call it ready.</p>
+            </div>
+          </div>`
+      },
+      {
+        notes: "Honesty. Course demo works. Would not put this on a real carrier yet. Speed, one-at-a-time, open chat must not be public.",
+        html: `
+          <p class="kicker">Straight talk</p>
+          <h2>This is a working demo. It is not a live carrier yet.</h2>
+          <div class="grid g2">
+            <div class="card ok">
+              <span class="num">In this room</span>
+              <h3>What you can trust</h3>
+              <p>The PIN path works. You can see sources. You can reach a human. A manager can approve a credit. Off-topic stays off-topic.</p>
+            </div>
+            <div class="card warn">
+              <span class="num">If this were your network</span>
+              <h3>What I’d say</h3>
+              <p>It can feel slow. One conversation at a time. I would not put this on the public internet as-is.</p>
+            </div>
+          </div>
+          <p class="muted">The team shipped a laptop product in six weeks. Selling it is a different job.</p>`
+      },
+      {
+        notes: "Commercial as who we help next. Sit next to Zendesk. Fix trust and wait time before adding a fifth agent.",
+        html: `
+          <p class="kicker">If we took this further</p>
+          <h2>Help the same three people — at a company that already has a helpdesk</h2>
+          <div class="grid g2">
+            <div class="card accent">
+              <span class="num">Who would care</span>
+              <h3>A team drowning in PIN and billing chats</h3>
+              <p>They keep Zendesk. They want a first line that doesn’t embarrass them on escalate.</p>
+            </div>
+            <div class="card">
+              <span class="num">What we’d do first</span>
+              <h3>Trust, then wait time, then a real ticket</h3>
+              <p>Make the miss never look like an answer. Let more than one customer chat. Then change the agent’s day.</p>
+            </div>
+          </div>
+          <p class="muted">More agents is not the next step. A kinder wait is.</p>`
+      },
+      {
+        cover: true,
+        notes: "Close on the feeling. Offer Q&A: live chat, the four agents, models, HITL, or guardrails. Weeds live in SAD / speaker notes.",
+        html: `
+          <p class="kicker">Take with you</p>
+          <h1>Never make the customer start over</h1>
+          <p class="lead">Ground it, refuse what isn’t ours, hand it off, or wait for a yes.</p>
+          <div class="grid g3">
+            <div class="card" style="background:#173252;border-color:#2a5278;color:#e8eef5">
+              <span class="num" style="color:#8fe0d6">Chat</span>
+              <h3 style="color:#fff">Ask about what you saw</h3>
+              <p style="color:#c5d0de">I’ll stay with the story.</p>
+            </div>
+            <div class="card" style="background:#173252;border-color:#2a5278;color:#e8eef5">
+              <span class="num" style="color:#8fe0d6">How it works</span>
+              <h3 style="color:#fff">Agents, models, HITL</h3>
+              <p style="color:#c5d0de">After the feeling, as deep as you want.</p>
+            </div>
+            <div class="card" style="background:#173252;border-color:#2a5278;color:#e8eef5">
+              <span class="num" style="color:#8fe0d6">What ships next</span>
+              <h3 style="color:#fff">Trust, speed, a real ticket</h3>
+              <p style="color:#c5d0de">That’s the order.</p>
+            </div>
+          </div>`
+      }
+    ];
+
+    const slidesEl = document.getElementById("slides");
+    const notesEl = document.getElementById("notes");
+    const bar = document.getElementById("bar");
+    const counter = document.getElementById("counter");
+    const help = document.getElementById("help");
+    let i = 0;
+
+    SLIDES.forEach((s, idx) => {
+      const el = document.createElement("section");
+      el.className = "slide" + (idx === 0 ? " active" : "") + (s.cover ? " cover" : "");
+      el.innerHTML = s.html;
+      el.dataset.notes = s.notes;
+      slidesEl.appendChild(el);
+    });
+
+    function show(n) {
+      const slides = [...document.querySelectorAll(".slide")];
+      i = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach((s, k) => s.classList.toggle("active", k === i));
+      notesEl.innerHTML = "<h3>Speaker notes</h3><p>" + slides[i].dataset.notes + "</p>";
+      counter.textContent = (i + 1) + " / " + slides.length;
+      bar.style.width = ((i + 1) / slides.length * 100) + "%";
+      location.hash = String(i + 1);
+    }
+
+    function parseHash() {
+      const n = parseInt(location.hash.replace("#", ""), 10);
+      return Number.isFinite(n) ? n - 1 : 0;
+    }
+
+    document.getElementById("btn-next").onclick = () => show(i + 1);
+    document.getElementById("btn-prev").onclick = () => show(i - 1);
+    document.getElementById("btn-notes").onclick = () => notesEl.classList.toggle("open");
+    document.getElementById("btn-help").onclick = () => help.classList.add("open");
+    help.onclick = () => help.classList.remove("open");
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") { e.preventDefault(); show(i + 1); }
+      if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); show(i - 1); }
+      if (e.key === "n" || e.key === "N") notesEl.classList.toggle("open");
+      if (e.key === "?" ) help.classList.toggle("open");
+      if (e.key === "Escape") help.classList.remove("open");
+      if (e.key === "f" || e.key === "F") document.documentElement.requestFullscreen?.();
+      if (e.key === "p" || e.key === "P") window.print();
+    });
+
+    show(parseHash());
+    window.addEventListener("hashchange", () => show(parseHash()));
+  </script>
+</body>
+</html>

@@ -64,11 +64,14 @@ compose_response:
        Set refused=true. Do NOT suggest speaking with a human agent or specialist.
     1. If gap=true or no citations available, set refused=true and explain you don't have
        that information in your knowledge base
-    2. If citations are available, compose a helpful, empathetic response that:
+    2. If citations are available AND they actually answer this question, compose a helpful, empathetic response that:
        - Directly answers the customer's question
        - Cites specific sources used
        - Is written in a friendly, professional tone
        - Stays within B-Mobile policy
+    2b. Never attach a KB article that does not mention the product or topic the customer asked about
+       (e.g. do not cite a generic warranty article for a product not in the knowledge base).
+       In that case set refused=true and sources_used=[].
     3. Never invent or assume information not in the provided sources
     4. Keep responses concise (2-4 paragraphs)
     
@@ -116,7 +119,8 @@ triage_and_escalate:
     
     On ESCALATE:
     - Create escalation packet with all context
-    - Use ticket_stub tool to generate stub ticket ID
+    - Use ticket_stub tool to generate stub ticket ID — never invent TICKET-/TKT- ids
+    - Copy the tool return value (always STUB- followed by 8 hex characters) into packet.stub_ticket_id
     - Set packet and stub_ticket_id fields
     - Include all relevant reason_codes
     

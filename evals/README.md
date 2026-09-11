@@ -10,8 +10,8 @@ Implements SAD §9 evaluation criteria (`EC-001`…`EC-019`) for the B-Mobile su
 
 ```bash
 # From repository root
-python -m evals.run --static --fixtures
-python -m evals.run --live --base-url http://127.0.0.1:8001
+python -m evals.run --static --fixtures --profile mvp
+python -m evals.run --all --profile production --base-url http://127.0.0.1:8001
 ```
 
-Course pass = static + fixtures. Latency is monitoring-only. See `RUNNING.md` for flags and env vars.
+Default profile is **production** (live + Path A p95 < 30s when live runs). `--profile mvp` keeps the course demo bar (static + fixtures). See `RUNNING.md` for flags and env vars.

@@ -710,7 +710,7 @@ Measurable pass criteria across accuracy, latency, safety, security, and cost. T
 
 **Out of contract for this table (deferred to `@qa.eng` `*run-evals`):** golden-dataset design, judge prompt/rubric text, runner layout under `evals/`, and production monitoring recommendations for Deliver.
 
-**Operator gap check:** OQ #11–#13 **resolved** via operator answers during `*define-eval-criteria` / `*run-evals` (accuracy = A/B/C+AC binaries; cost = control-only; latency = excluded from course pass). See `project-context/2.build/evals.md`.
+**Operator gap check:** OQ #11–#13 **resolved** for **MVP** via operator answers during `*define-eval-criteria` / `*run-evals` (accuracy = A/B/C+AC binaries; cost = control-only; latency = excluded from MVP course pass). **Production profile (operator 2026-09-10):** live item pass + Path A p95 **< 30s** (EC-006 / PRD §5) are promotion gates; cost remains control-only (no $/ticket invented); EC-005 stays non-blocking until calibrated. See `project-context/2.build/evals.md` and `evals/thresholds.py`.
 
 ---
 
@@ -827,7 +827,7 @@ POST /api/chat
 10. ~~Per-agent vs tiered models~~ — **Resolved (ADR-19):** `OPENAI_MODEL_LOW` / `OPENAI_MODEL_MID` + agent→tier map.  
 11. ~~**Eval — aggregate accuracy rate**~~ — **Resolved (operator 2026-09-06):** Suite pass = **demo paths A/B/C + AC binary gates only** (option a). PRD §7 containment / grounded-answer **rates** stay monitoring KPIs, not MVP eval pass %.  
 12. ~~**Eval — per-ticket cost ceiling**~~ — **Resolved (operator 2026-09-06 via `*run-evals`):** **(a) control-only** — `max_iter` / `MAX_RPM` / model tiers (EC-016…018); no $/ticket or token pass gate.  
-13. ~~**Eval — Ollama vs EC-006**~~ — **Resolved (operator 2026-09-06 via `*run-evals`):** **(d) exclude latency from course pass** — EC-006/EC-007 are monitoring/aspirational only for MVP eval grading.
+13. ~~**Eval — Ollama vs EC-006**~~ — **Resolved (operator 2026-09-06 via `*run-evals`):** **(d) exclude latency from MVP course pass**. **Addendum (operator 2026-09-10):** production profile grades Path A p95 **< 30s** (EC-006); EC-007 still monitoring; Ollama may miss the 30s bar.
 
 ## Audit
 
@@ -958,4 +958,16 @@ POST /api/chat
 | Operator answer | OQ #12 = (a) control-only cost; OQ #13 = (d) exclude latency from course pass |
 | Prompt Trace | Omitted |
 | Change note | Resolved OQ #12–#13; §9 gap-check points to evals.md |
+
+### Audit (append)
+
+| Field | Value |
+|-------|-------|
+| Timestamp | 2026-09-10T21:25:00-05:00 |
+| Persona id | qa-eng |
+| Action | run-evals (production profile thresholds) |
+| Resolved `AAMAD_TARGET_RUNTIME` | crewai |
+| Operator answer | Production promotion = live items + Path A p95 &lt; 30s; cost still control-only; EC-005 still uncalibrated |
+| Prompt Trace | Omitted |
+| Change note | §9 gap-check + OQ #13 addendum for production vs MVP profiles; gates in `evals/thresholds.py` |
 

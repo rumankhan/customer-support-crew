@@ -34,6 +34,7 @@ from backend.auth import require_operator_key
 from backend.chat_service import (
     DEFAULT_TIMEOUT_SECONDS,
     error_response,
+    issue_stub_ticket_id,
     map_to_response,
     run_crew_sync,
     write_prompt_trace,
@@ -121,7 +122,7 @@ async def chat_validation_handler(request: Request, exc: RequestValidationError)
     first_msg = "Invalid chat request."
     if exc.errors():
         first_msg = str(exc.errors()[0].get("msg", first_msg))
-    stub = f"STUB-{uuid.uuid4().hex[:8].upper()}"
+    stub = issue_stub_ticket_id()
     envelope = ChatResponse(
         decision="escalate",
         reply="We could not complete this request. Please talk to a human.",

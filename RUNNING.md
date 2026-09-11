@@ -330,21 +330,29 @@ Run all commands from the **repository root**.
 | **Live** | `--live` | Yes (`:8001`) | Same dataset via real `POST /api/chat` (uses your LLM; can take minutes per item) |
 | **All** | `--all` (default) | Live only if healthy | Static + fixtures; adds live when `GET /health` succeeds |
 
-**Course pass (MVP):** static + fixtures must pass. Latency (p95 / first-stage) is **monitoring only** — it does not fail the suite. Aggregate containment % and $/ticket are not course gates.
+**Profiles** (`--profile` or `EVAL_PROFILE`, default **production**):
+
+| Profile | `course_pass` | `production_ready` |
+|---------|---------------|-------------------|
+| **mvp** | static + fixtures | false unless live also passed Path A p95 |
+| **production** | static + fixtures; live items + Path A p95 **< 30s** when live ran | true only when live ran and passed those gates |
+
+Latency p95 applies to **Path A** only (automated FAQ). Path C HITL wait is excluded. Cost stays control-only. EC-005 judge does not block.
 
 ### Quick run (no LLM)
 
 ```bash
-python -m evals.run --static --fixtures
+python -m evals.run --static --fixtures --profile mvp
 ```
 
-Expected: `course_pass: true`, results written to `evals/results/latest.json`.
+Expected: `course_pass: true`. Default `--profile production` on the same command still passes `course_pass` but sets `production_ready: false` (`live_not_run`).
 
 ### Live run (backend must be up)
 
 Start the API via [Quick Start (local)](#quick-start-local) or [Docker Compose](#quick-start-docker-compose), then:
 
 ```bash
+python -m evals.run --all --profile production --base-url http://127.0.0.1:8001
 python -m evals.run --live --base-url http://127.0.0.1:8001
 ```
 
@@ -381,6 +389,8 @@ python -m evals.run --live --judge
 | `NEXT_PUBLIC_API_BASE_URL` / `--base-url` | Live API target (default `http://127.0.0.1:8001`) |
 | `CHAT_TIMEOUT_SECONDS` | Live request timeout budget (+30s headroom in the runner) |
 | `MAX_ITER` / `MAX_RPM` | Static cost checks (defaults 12 / 10) |
+| `EVAL_PROFILE` | `mvp` or `production` (default `production`) |
+| `EVAL_PRODUCTION_P95_MS` | Path A live p95 gate (default `30000`) |
 | `EVAL_JUDGE_MODEL` | Judge model for `--judge` (default `gpt-4o`) |
 | `OPENAI_API_KEY` or `EVAL_JUDGE_API_KEY` | Required for `--judge` |
 

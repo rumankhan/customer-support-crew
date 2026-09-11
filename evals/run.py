@@ -3,10 +3,9 @@
 Eval runner for B-Mobile Multi-Agent Customer Support Crew.
 
 Usage (from repo root):
-  python -m evals.run --static
+  python -m evals.run --static --fixtures --profile mvp
+  python -m evals.run --all --profile production
   python -m evals.run --live --base-url http://127.0.0.1:8001
-  python -m evals.run --fixtures
-  python -m evals.run --all
 
 Implements SAD §9 EC-* contract. Latency ECs are monitoring-only (operator OQ#13d).
 """
@@ -34,6 +33,7 @@ load_dotenv(ROOT / ".env")
 from evals.checks.config_checks import run_config_checks
 from evals.checks.response_checks import grade_response
 from evals.judge.faithfulness import judge_faithfulness
+from evals.thresholds import evaluate_gates, profile_config, resolve_profile
 
 DATASET_DIR = Path(__file__).parent / "dataset"
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -240,19 +240,30 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=float(os.getenv("CHAT_TIMEOUT_SECONDS", "180")) + 30)
     parser.add_argument("--judge", action="store_true", help="Enable EC-005 LLM judge when keys available")
     parser.add_argument("--limit", type=int, default=0, help="Limit dataset items (0=all)")
+    parser.add_argument(
+        "--profile",
+        choices=("mvp", "production"),
+        default=None,
+        help="mvp = static+fixtures course pass; production = live + Path A p95 < 30s (default EVAL_PROFILE or production)",
+    )
     args = parser.parse_args()
 
     if not any([args.static, args.fixtures, args.live, args.all]):
         args.all = True
 
+    profile_name = resolve_profile(args.profile)
+    cfg = profile_config(profile_name)
+
     report: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "runtime": os.getenv("AAMAD_TARGET_RUNTIME", "crewai"),
+        "profile": profile_name,
         "operator": {
-            "cost": "control_only",
-            "latency_course_pass": False,
+            "cost": cfg["cost"],
+            "latency_course_pass": cfg["latency_course_pass"],
             "dataset": "synthetic",
             "judge": "different_model_uncalibrated",
+            "path_a_p95_ms": cfg["path_a_p95_ms"],
         },
         "sections": {},
     }
@@ -291,17 +302,22 @@ def main() -> int:
             "error": f"GET {args.base_url}/health failed",
         }
 
-    # Overall course pass: static must pass; fixtures if present; live if present and not skipped
-    course = True
-    for key, section in report["sections"].items():
-        if key == "live" and section.get("error"):
-            continue
-        if "pass" in section:
-            course = course and bool(section["pass"])
-    report["course_pass"] = course
+    gates = evaluate_gates(report["sections"], cfg)
+    report["course_pass"] = gates["course_pass"]
+    report["production_ready"] = gates["production_ready"]
+    report["blockers"] = gates["blockers"]
+    if gates.get("latency_slo"):
+        report["latency_slo"] = gates["latency_slo"]
 
     out = write_results(report)
-    print(json.dumps({"course_pass": course, "results": str(out), "sections": list(report["sections"].keys())}, indent=2))
+    print(json.dumps({
+        "profile": profile_name,
+        "course_pass": gates["course_pass"],
+        "production_ready": gates["production_ready"],
+        "blockers": gates["blockers"],
+        "results": str(out),
+        "sections": list(report["sections"].keys()),
+    }, indent=2))
     for name, section in report["sections"].items():
         print(f"\n== {name} pass={section.get('pass')} ==")
         if name == "static":
@@ -311,10 +327,18 @@ def main() -> int:
         if name in ("fixtures", "live") and "by_category" in section:
             for cat, stats in section["by_category"].items():
                 print(f"  {cat}: {stats['pass']}/{stats['total']} pass")
+        if name == "live" and section.get("latency_slo"):
+            slo = section["latency_slo"]
+            p95 = slo.get("p95_ms")
+            p95_s = f"{p95:.0f}ms" if isinstance(p95, (int, float)) else "n/a"
+            print(
+                f"  Path A p95: {p95_s} (threshold {slo['threshold_ms']:.0f}ms, "
+                f"graded={slo['graded']}, pass={slo['pass']})"
+            )
         if section.get("error"):
             print(f"  ERROR: {section['error']}")
 
-    return 0 if course else 1
+    return 0 if gates["course_pass"] else 1
 
 
 if __name__ == "__main__":

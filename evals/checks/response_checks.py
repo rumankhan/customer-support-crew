@@ -124,7 +124,10 @@ def grade_response(
             checks.append({
                 "id": "latency_monitoring_only",
                 "ok": True,
-                "detail": f"{detail}; excluded from course pass (operator OQ#13d)",
+                "detail": (
+                    f"{detail}; item latency is not an item fail — "
+                    "production Path A p95 is graded at suite level (EC-006)"
+                ),
             })
             if "EC-006" in ec_results:
                 ec_results["EC-006"] = None  # not graded for course pass

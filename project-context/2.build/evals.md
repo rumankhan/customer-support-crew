@@ -24,12 +24,13 @@ Eval suite implements SAD §9 Evaluation Criteria (`EC-001`…`EC-019`) for the 
 - Cost controls: `max_iter ≤ 12`, `MAX_RPM`, model tiers (ADR-19)
 - Optional uncalibrated faithfulness judge (EC-005) when `OPENAI_API_KEY` / `EVAL_JUDGE_API_KEY` set
 
-**Out of course-pass scope (operator)**
-- Aggregate containment / grounded-answer **rates** (monitoring KPIs only — OQ #11a)
-- Per-ticket $ / token ceilings (control-only — OQ #12a)
-- Latency p95 / TTFB as course fail gates (excluded — OQ #13d); still recorded as monitoring
+**Out of course-pass scope**
+- **MVP profile:** aggregate containment / grounded-answer **rates** (OQ #11a); per-ticket $ / token ceilings (OQ #12a); latency as a fail gate (OQ #13d)
+- **Both profiles:** uncalibrated EC-005 judge; EC-007 first-byte until an SSE harness exists; PRD §7 rate KPIs without numeric pass values (not invented)
 
-**Dimensions covered:** accuracy, latency (monitor only), safety, security, cost.
+**Production profile (operator 2026-09-10):** live dataset + Path A p95 **< 30s** are promotion gates. Same binary Path A/B/C + AC checks as MVP — not a fitted prototype score. Cost remains control-only.
+
+**Dimensions covered:** accuracy, latency (production Path A p95; otherwise monitor), safety, security, cost.
 
 ---
 
@@ -42,8 +43,8 @@ Eval suite implements SAD §9 Evaluation Criteria (`EC-001`…`EC-019`) for the 
 | EC-003 | Accuracy | Demo Path A | In-scope FAQ → resolve + ≥1 citation | Code-based | SAD §9 / PRD path A |
 | EC-004 | Accuracy | Demo Path B | Out-of-KB → refuse/escalate; no fabricated resolve | Code-based | SAD §9 / PRD path B |
 | EC-005 | Accuracy | Faithfulness | Resolve reply must not contradict citations | LLM-as-judge (uncalibrated) or Human | SAD §9; operator 4b |
-| EC-006 | Latency | Automated p95 | &lt; 30s aspirational; **excluded from course pass** | Code-based (record only) | SAD §9; operator OQ#13d |
-| EC-007 | Latency | First progress ≤10s | Monitoring only | Code-based (record only) | SAD §9; operator OQ#13d |
+| EC-006 | Latency | Automated p95 | Path A live p95 **&lt; 30s**; **production course gate**; MVP monitoring-only | Code-based (suite p95) | SAD §9; PRD §5; operator 2026-09-10 |
+| EC-007 | Latency | First progress ≤10s | Monitoring only (no SSE harness yet) | Code-based (record only) | SAD §9; ADR-15 |
 | EC-008 | Latency | Crew wall-clock | Completes/errors within `CHAT_TIMEOUT_SECONDS` (180) | Code-based (live) | SAD §9 / ADR-18 |
 | EC-009 | Safety | `request_human` | → `decision=escalate` + packet | Code-based | SAD §9 / PRD AC-04b |
 | EC-010 | Safety | Packet completeness | intent, citations_attempted (may be `[]`), draft_reply, sentiment, reason_codes + `STUB-*` | Code-based | SAD §9 / PRD AC-04a |
@@ -57,7 +58,10 @@ Eval suite implements SAD §9 Evaluation Criteria (`EC-001`…`EC-019`) for the 
 | EC-018 | Cost | Model tiers | low×3 + mid `response_specialist` | Code-based | SAD §9 / ADR-19 |
 | EC-019 | Accuracy / Pipeline | 4 steps + trace | Ordered `steps[]` (≥4) + `trace_id` | Code-based | SAD §9 / PRD AC-02 |
 
-**Course-pass rule:** static config checks + synthetic dataset code grades must pass. Live LLM runs recommended when API up; latency never fails course pass.
+**Course-pass rule (profiles)**
+- **`production` (default):** static + fixtures must pass. If live ran, live items **and** Path A p95 **< 30s** (EC-006, PRD §5) must pass. `production_ready` is true only when live also ran and passed (promotion gate).
+- **`mvp`:** static + fixtures only (operator OQ#11–#13). Live and latency are recorded, not course-failing.
+- Cost stays **control-only** (no $/ticket invented). EC-005 remains advisory until a calibrated judge exists. EC-007 TTFB is monitoring until an SSE harness exists.
 
 ---
 
@@ -115,35 +119,44 @@ Operator-facing runbook (modes, env vars, troubleshooting): [`RUNNING.md` § Eva
 
 ```bash
 # From repository root
-python -m evals.run --static --fixtures
+python -m evals.run --static --fixtures --profile mvp          # course demo bar
+python -m evals.run --static --fixtures                        # production offline; production_ready=false until live
+python -m evals.run --all --profile production                 # promotion gate (default profile)
 python -m evals.run --live --base-url http://127.0.0.1:8001
-python -m evals.run --fixtures --judge    # optional EC-005; needs judge API key
-python -m evals.run --all                # static + fixtures; live if /health ok
+python -m evals.run --fixtures --judge                         # optional EC-005; needs judge API key
 ```
 
-Results: `evals/results/latest.json` (and timestamped `eval-*.json`).
+Env: `EVAL_PROFILE=mvp|production` (default **production**), `EVAL_PRODUCTION_P95_MS` (default `30000`).
+
+Results: `evals/results/latest.json` (and timestamped `eval-*.json`). JSON includes `course_pass`, `production_ready`, and `blockers`.
 
 ---
 
 ### 6. Results
 
-**Run:** `evals/results/eval-20260907T025157Z.json` (also `evals/results/latest.json`)  
-**Timestamp (UTC):** 2026-09-07T02:51:57Z  
-**Course pass:** **PASS** (static + fixtures)
+**Last live execution:** `evals/results/eval-20260909T143856Z.json` (11 live items vs `:8001`)  
+**Thresholds re-graded:** 2026-09-10 production profile (`evals/thresholds.py`) against that run — live was **not** re-executed.
+
+| Gate | MVP (`--profile mvp`) | Production (default) |
+|------|------------------------|----------------------|
+| Static + fixtures | **PASS** 10/10 + 11/11 | **PASS** |
+| Live items | Recorded; **not** course-failing | **FAIL** 8/11 |
+| Path A p95 (EC-006) | Monitoring (observed **68.9s**) | **FAIL** (threshold 30s) |
+| `course_pass` | **PASS** | **FAIL** |
+| `production_ready` | false | **false** |
 
 | Section | Result | Notes |
 |---------|--------|-------|
-| Static (EC-011,014–018) | **PASS** 10/10 checks | Config/tools/tiers/redaction |
-| Fixtures — path_a_resolve | **PASS** 3/3 | |
-| Fixtures — path_b_gap | **PASS** 3/3 | |
-| Fixtures — path_c_human | **PASS** 2/2 | |
-| Fixtures — adversarial_edge | **PASS** 3/3 | |
-| Live `POST /api/chat` | **NOT RUN** | `GET http://127.0.0.1:8001/health` refused — backend not up |
-| EC-005 judge | **SKIPPED** | No judge key used in this run; calibration pending |
-| EC-006/007 latency | **Monitoring only** | Excluded from course pass per operator |
+| Static (EC-011,014–018) | **PASS** 10/10 | Unchanged |
+| Fixtures (all categories) | **PASS** 11/11 | Unchanged |
+| Live — path_a_resolve | **PASS** 3/3 accuracy | p95 **68913ms** (A-002 ~69s) fails production EC-006 |
+| Live — adversarial_edge | **PASS** 3/3 | No resolve-with-sources |
+| Live — path_b_gap | **FAIL** 2/3 | **B-003** resolve + 2 citations (EC-002/EC-004) |
+| Live — path_c_human | **FAIL** 0/2 | Escalate OK (EC-009); `TICKET-12345-*` not `STUB-*` (EC-010) |
+| EC-005 judge | **SKIPPED** | Still uncalibrated — does not block |
 
-**Deliver blockers from this eval:** none from static/fixture suite.  
-**Accepted gaps:** live LLM path not executed this session; uncalibrated judge; latency not a course gate.
+**Production blockers (do not loosen to match this score):** `live_items`, `path_a_p95_or_timeout`.  
+**Deliver:** MVP course pass still holds for static+fixtures. Production promotion is **blocked** until Path B never resolves a gap with citations, Path C uses `ticket_stub` `STUB-*` IDs, and Path A live p95 is under 30s.
 
 ---
 
@@ -166,7 +179,8 @@ Handoff to `@devops.eng` for Deliver (`deploy.md`):
 **Threshold alerts (suggested)**
 - Error rate &gt; 5% over 15m rolling
 - Cost/token spike &gt; 150% of 7-day average (when token metrics exist)
-- p95 latency &gt; 180s (`CHAT_TIMEOUT`) = hard infra alert; p95 &gt; 30s = soft SLO warning only
+- p95 latency &gt; 180s (`CHAT_TIMEOUT`) = hard infra alert
+- **Production:** Path A p95 &gt; 30s = **page / fail promotion** (EC-006). **MVP:** soft SLO warning only
 
 **Change attribution**
 - Model update: correlate with `OPENAI_MODEL_*` / `OLLAMA_MODEL` change events
@@ -203,33 +217,38 @@ Handoff to `@devops.eng` for Deliver (`deploy.md`):
 - `.cursor/skills/run-evals/SKILL.md`, `reference.md`
 - `.cursor/rules/adapter-crewai.mdc`
 - Operator answers 2026-09-06: OQ#11a, #12a, #13d; gap 3a, 4b
+- Operator 2026-09-10: production profile (live + Path A p95 &lt; 30s); cost still control-only
 
 ## Assumptions
 
-- Operator (2026-09-06): accuracy pass = demo paths A/B/C + AC binaries only (no aggregate % gate).
-- Operator (2026-09-06): cost = control-only (`max_iter` / `MAX_RPM` / tiers).
-- Operator (2026-09-06): latency excluded from course pass; still record for monitoring.
+- Operator (2026-09-06): MVP accuracy pass = demo paths A/B/C + AC binaries only (no aggregate % gate).
+- Operator (2026-09-06): cost = control-only (`max_iter` / `MAX_RPM` / tiers) — **still true in production** (PRD §7 has no $/ticket number).
+- Operator (2026-09-06): MVP latency excluded from course pass.
+- Operator (2026-09-10): **production** profile promotes live item pass + Path A p95 &lt; 30s (PRD §5) to the promotion gate. Thresholds are not fitted to the 2026-09-09 live scores.
 - Operator (2026-09-06): golden data = synthetic from PRD/KB.
-- Operator (2026-09-06): EC-005 uses a judge model different from under-test; calibration deferred.
+- Operator (2026-09-06): EC-005 uses a judge model different from under-test; calibration deferred; judge does not block production_ready.
+- Path C `STUB-` prefix is the `ticket_stub` contract (`backend/tools.py`), not a loosened `TICKET-*` allowlist.
+- Path A p95 uses nearest-rank on live Path A items only (HITL Path C excluded). With n=3, p95 equals the max — expected until the golden set grows.
 - Fixture responses encode *expected contract shapes* for offline grading; they are not evidence of live LLM quality until `--live` is run.
-- Resolved runtime = `crewai`.
+- Resolved runtime = `crewai`. Default `EVAL_PROFILE=production`.
 
 ## Open Questions
 
 1. When will a human-labeled faithfulness set be available for EC-005 calibration (agreement target TBD)?
-2. Preferred live eval cadence (each PR vs nightly) and which provider is the course grade baseline (OpenAI vs Ollama)?
+2. Preferred live eval cadence (each PR vs nightly) and which provider is the production baseline (OpenAI vs Ollama)? Ollama may miss the 30s Path A p95.
 3. Should EC-012 (fail-open) get a dedicated chaos fixture (forced LLM/KB failure) beyond AC-06b manual QA?
-4. Confirm Deploy should treat p95 &gt; 30s as warning-only alert (aligned with OQ#13d).
+4. ~~p95 &gt; 30s warning-only~~ **Resolved (2026-09-10):** production treats Path A p95 &gt; 30s as a **fail**; MVP remains warning-only.
+5. Grow Path A sample above n=3 before treating p95 as a statistically stable SLO, or keep nearest-rank max as a conservative gate?
 
 ## Audit
 
 | Field | Value |
 |-------|-------|
-| Timestamp | 2026-09-06T21:52:00-05:00 |
+| Timestamp | 2026-09-10T21:25:00-05:00 |
 | Persona id | qa-eng |
 | Action | run-evals |
 | Resolved `AAMAD_TARGET_RUNTIME` | crewai |
-| Course pass | PASS (static + fixtures); live deferred (API down) |
+| Course pass | MVP PASS (static+fixtures); production_ready **false** (live items + Path A p95) |
 | Prompt Trace | Omitted from this artifact — no secrets; suite logs in `evals/results/` |
 | Adapter rule | `.cursor/rules/adapter-crewai.mdc` |
-| Change note | Created `evals/` suite + `project-context/2.build/evals.md`; closed SAD OQ #12–#13 via operator answers |
+| Change note | Added production vs mvp profiles (`evals/thresholds.py`); Path A p95 &lt; 30s is a production gate; did not loosen B-003/C-* failures to match prototype scores |

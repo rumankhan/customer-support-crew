@@ -249,6 +249,8 @@ The escalation agent may still emit `decision=escalate` on KB gaps. **`backend/c
 | `apply_greeting_resolve_override()` | Classifier intent is greeting / small_talk | `decision=resolve`; strip soft reason codes; default welcome reply |
 | `apply_low_urgency_resolve_override()` | `urgency=low`, neutral/positive, not high risk, no hard reason codes | `decision=resolve`; gap reply without human handoff |
 | `apply_out_of_scope_reply_policy()` | Intent is `out_of_scope` / off-topic | `decision=resolve`; `OUT_OF_SCOPE_REPLY` or sanitized reply (strips “human agent” pitches) |
+| `filter_grounded_sources()` | After crew mapping | Re-query FTS on the **customer message**; drop citations whose titles are not live KB hits (Path B fabrication) |
+| `ensure_escalation_artifacts()` | `decision=escalate` or `request_human=true` | Packet required; `stub_ticket_id` must match `STUB-` + 8 hex (replace LLM `TICKET-` / `TKT-` ids) |
 
 **Hard escalate reason codes** (overrides never apply): `request_human`, `high_risk_sentiment`, `timeout`, `system_error`.
 
@@ -1026,6 +1028,7 @@ ls -l project-context/2.build/logs/
 | 2026-08-25T23:05:00Z | @backend.eng | externalize-yaml | Extracted agent and task definitions to `backend/config/agents.yaml` and `backend/config/tasks.yaml` per CrewAI adapter rules; updated crew.py to load from YAML with dynamic value injection; added pyyaml dependency; fully compliant with SAD §2 YAML externalization requirement |
 | 2026-08-28T23:45:00-05:00 | @backend.eng | sync-docs | Documented SQLite FTS5 (ADR-20), Telegram HITL (ADR-21), SSE HITL events, approval APIs, 180s crew / 300s HITL timeouts, port 8001 demo |
 | 2026-08-29T11:20:00-05:00 | @backend.eng | sync-docs | Traceability + audit appendix: FTS5 live, 180s/300s/~500s; no customer specialist strip; superseded 45s/TF-IDF rows |
+| 2026-09-10T21:45:00-05:00 | @backend.eng | fix-failure-paths | Path B: strip ungrounded citations via live FTS on the customer message. Path C: replace hallucinated ticket ids with `STUB-` + 8 hex; force escalate + packet when `request_human=true`. |
 
 ---
 

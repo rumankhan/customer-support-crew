@@ -16,6 +16,7 @@ from backend.models import (
     ApprovalRequest,
     ChatRequest,
     ChatResponse,
+    Citation,
     ErrorDetail,
     EscalationPacket,
     MetaInfo,
@@ -96,6 +97,115 @@ _OUT_OF_SCOPE_INTENT_SUBSTRINGS = (
     "outside scope",
     "outside b-mobile",
 )
+
+# ticket_stub returns STUB- + 8 hex chars. Reject LLM-invented TICKET-/TKT- ids.
+_STUB_TICKET_RE = re.compile(r"^STUB-[0-9A-F]{8}$", re.IGNORECASE)
+
+
+def issue_stub_ticket_id() -> str:
+    """Canonical stub id — same shape as TicketStubTool."""
+    return f"STUB-{uuid.uuid4().hex[:8].upper()}"
+
+
+def is_valid_stub_ticket_id(value: str | None) -> bool:
+    return isinstance(value, str) and bool(_STUB_TICKET_RE.match(value.strip()))
+
+
+def sanitize_stub_ticket_id(value: str | None) -> str:
+    """Keep a well-formed STUB-* id; otherwise mint one from the stub contract."""
+    if is_valid_stub_ticket_id(value):
+        return str(value).strip().upper()
+    return issue_stub_ticket_id()
+
+
+def _citation_title(src: Any) -> str:
+    if isinstance(src, Citation):
+        return (src.title or "").strip()
+    if isinstance(src, dict):
+        return str(src.get("title") or "").strip()
+    return ""
+
+
+def lookup_kb_allowed_titles(query: str) -> tuple[bool, set[str]]:
+    """
+    Re-run FTS against the customer message.
+    Returns (gap, allowed_titles). On tool/DB failure, treat as gap so we never
+    attach invented citations (fail-closed on grounding, fail-open on chat).
+    """
+    if not query or not query.strip():
+        return True, set()
+    try:
+        from backend.tools import kb_search_tool
+
+        raw = kb_search_tool._run(query)
+        data = json.loads(raw)
+    except Exception:  # noqa: BLE001 — missing DB / FTS errors must not leak citations
+        return True, set()
+    titles: set[str] = set()
+    for item in (data.get("citations") or []) + (data.get("passages") or []):
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip().lower()
+        if title:
+            titles.add(title)
+    gap = bool(data.get("gap", True)) or not titles
+    return gap, titles
+
+
+def filter_grounded_sources(
+    claimed: list[Any] | None,
+    *,
+    kb_gap: bool,
+    allowed_titles: set[str],
+) -> list[Citation]:
+    """Drop citations that did not come from a live KB hit on the customer message."""
+    if kb_gap or not claimed:
+        return []
+    kept: list[Citation] = []
+    for src in claimed:
+        title = _citation_title(src)
+        if title.lower() in allowed_titles:
+            kept.append(src if isinstance(src, Citation) else Citation.model_validate(src))
+    return kept
+
+
+def ensure_escalation_artifacts(
+    *,
+    packet: EscalationPacket | None,
+    stub_ticket_id: str | None,
+    request: ChatRequest,
+    classifier_intent: str | None,
+    classifier_urgency: str | None,
+    sentiment: str,
+    risk: str,
+    reason_codes: list[str],
+    reply: str,
+    citations_attempted: list[Citation],
+) -> tuple[EscalationPacket, str]:
+    """Escalate responses always carry a packet and a freshly issued STUB-* id.
+
+    Never copy the model-supplied ticket id — LLMs reuse example values such as
+    STUB-A1B2C3D4 that happen to match the regex.
+    """
+    stub = issue_stub_ticket_id()
+    urgency = classifier_urgency if classifier_urgency in ("low", "medium", "high") else "medium"
+    if packet is None:
+        packet = EscalationPacket(
+            intent=classifier_intent or "",
+            urgency=urgency,  # type: ignore[arg-type]
+            customer_message=request.message,
+            request_human=request.request_human,
+            citations_attempted=citations_attempted,
+            draft_reply=reply or "",
+            sentiment=sentiment,  # type: ignore[arg-type]
+            risk=risk,  # type: ignore[arg-type]
+            reason_codes=reason_codes,
+            stub_ticket_id=stub,
+        )
+    else:
+        packet = packet.model_copy(update={"stub_ticket_id": stub})
+    return packet, stub
+
 
 _HUMAN_HANDOFF_PHRASES = (
     "human agent",
@@ -302,6 +412,13 @@ def map_to_response(result: dict, trace_id: str, request: ChatRequest) -> ChatRe
         elif response_output.sources_used:
             sources_used = response_output.sources_used
 
+    kb_gap, allowed_titles = lookup_kb_allowed_titles(request.message)
+    sources_used = filter_grounded_sources(
+        sources_used,
+        kb_gap=kb_gap,
+        allowed_titles=allowed_titles,
+    )
+
     if (not reply or reply.startswith("We could not complete")) and packet and packet.draft_reply:
         reply = packet.draft_reply
 
@@ -343,6 +460,28 @@ def map_to_response(result: dict, trace_id: str, request: ChatRequest) -> ChatRe
     if out_of_scope_override:
         packet = None
         stub_ticket_id = None
+        sources_used = []
+
+    if request.request_human:
+        decision = "escalate"
+        if "request_human" not in reason_codes:
+            reason_codes = ["request_human", *reason_codes]
+        resolve_override = False
+        out_of_scope_override = False
+
+    if decision == "escalate":
+        packet, stub_ticket_id = ensure_escalation_artifacts(
+            packet=packet,
+            stub_ticket_id=stub_ticket_id,
+            request=request,
+            classifier_intent=classifier_intent,
+            classifier_urgency=classifier_urgency,
+            sentiment=sentiment,
+            risk=risk,
+            reason_codes=reason_codes,
+            reply=reply,
+            citations_attempted=list(sources_used),
+        )
         sources_used = []
 
     # ── HITL policy-action detection ──────────────────────────────────────────
@@ -438,7 +577,7 @@ def error_response(
         sentiment="neutral",
         risk="medium",
         reason_codes=reason_codes,
-        stub_ticket_id=f"STUB-{uuid.uuid4().hex[:8].upper()}",
+        stub_ticket_id=issue_stub_ticket_id(),
     )
 
     return ChatResponse(
